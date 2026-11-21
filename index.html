@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="An endless procedural drive through forests, lakes, hills, and mountains.">
+    <meta name="theme-color" content="#172928">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23172421'/%3E%3Cpath d='M4 24 13 9l5 8 4-6 6 13H4Z' fill='none' stroke='%23e6efaf' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E">
+    <title>Cozy Roads · The Open Road</title>
+  </head>
+  <body>
+    <main id="game">
+      <canvas id="view" aria-label="The Open Road driving scene"></canvas>
+      <div class="vignette" aria-hidden="true"></div>
+      <header class="top">
+        <div class="brand">
+          <svg width="31" height="30" viewBox="0 0 32 30" fill="none" aria-hidden="true">
+            <path d="M2 23 12 7l5 8 4-6 9 14H2Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>
+            <path d="M12 23c1-3 3-3 4-5l1-3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          <span>Cozy Roads</span>
+        </div>
+        <div class="toolbar">
+          <button id="pause" hidden type="button" class="hud-button">Pause</button>
+          <button id="performance-toggle" type="button" class="hud-button" aria-label="Performance" aria-expanded="false" aria-controls="performance">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M1 9h3l2-5 3 8 2-4h4" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span>Performance</span>
+          </button>
+        </div>
+      </header>
+
+      <section id="performance" class="performance" aria-label="Frame-time measurements" hidden>
+        <div class="performance-heading">
+          <h2>Frame times</h2>
+          <label>Quality
+            <select id="quality">
+              <option value="standard">Standard</option>
+              <option value="cinematic">Cinematic</option>
+              <option value="low">Low</option>
+            </select>
+          </label>
+        </div>
+        <p id="resolution" class="secondary"></p>
+        <p id="seed" class="secondary"></p>
+        <dl class="metrics">
+          <div><dt>FPS</dt><dd id="fps">—</dd></div>
+          <div><dt>Median</dt><dd id="median">—</dd></div>
+          <div><dt>p95</dt><dd id="p95">—</dd></div>
+        </dl>
+        <canvas id="graph" width="500" height="78" aria-hidden="true"></canvas>
+        <p id="benchmark-status" class="secondary" role="status">Compare settings over the same 30-second drive.</p>
+        <div class="benchmark-actions">
+          <button id="benchmark" type="button" class="hud-button" disabled>Run benchmark</button>
+          <button id="export" type="button" class="hud-button" hidden>Save JSON</button>
+        </div>
+      </section>
+
+      <section id="intro" class="intro" aria-labelledby="intro-title">
+        <h1 id="intro-title">The Open Road</h1>
+        <p id="intro-description">An endless drive through forests, lakes, hills, and mountains.</p>
+        <div class="garage">
+          <label for="vehicle">Vehicle</label>
+          <select id="vehicle" aria-describedby="vehicle-description" disabled>
+            <option value="wagon">Wayfarer</option>
+            <option value="retro">Redline 92</option>
+            <option value="hyper">Vela</option>
+            <option value="trail">Ridgeline 4×4</option>
+          </select>
+          <p id="vehicle-description"></p>
+        </div>
+        <div class="intro-actions">
+          <button id="start" class="primary" type="button" disabled>Generating the road…</button>
+          <button id="auto" class="text-button" type="button" disabled>Auto-drive</button>
+          <button id="new-world" class="text-button" type="button" disabled>New world</button>
+          <button id="restart" class="text-button" type="button" hidden>Restart</button>
+        </div>
+      </section>
+
+      <footer class="bottom">
+        <div class="route">
+          <div class="route-label"><span id="biome">Lakeshore</span><output id="distance">0.00 km</output></div>
+          <span id="surface">Pavement</span>
+        </div>
+        <div class="keys" aria-label="Driving controls">
+          <span><kbd>W</kbd><kbd>S</kbd> Drive / brake / reverse</span>
+          <span><kbd>A</kbd><kbd>D</kbd> Steer</span>
+        </div>
+        <div class="speed" aria-label="Vehicle speed">
+          <span id="reverse" aria-label="Reverse gear" hidden>R</span><output id="speed">00</output><span>km/h</span>
+        </div>
+      </footer>
+
+      <div id="touch" class="touch" hidden aria-label="Touch driving controls">
+        <div><button type="button" data-key="left" aria-label="Steer left">←</button><button type="button" data-key="right" aria-label="Steer right">→</button></div>
+        <div><button type="button" data-key="brake">Brake / reverse</button><button type="button" data-key="throttle">Drive</button></div>
+      </div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

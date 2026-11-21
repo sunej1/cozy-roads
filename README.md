@@ -1,0 +1,52 @@
+# Cozy Roads
+
+A local Three.js driving prototype. **The Open Road** keeps generating a road through lake basins, pine forests, rolling hills, and alpine mountains as you drive.
+
+## Run locally
+
+Use Node.js 20.19 or later in the 20.x line, or Node.js 22.12 or later. The game opens in Cinematic on WebGPU and Standard on the automatic WebGL 2 fallback. Add `?renderer=webgl` to force the fallback for testing.
+
+```sh
+npm ci
+npm run dev
+```
+
+Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. **Esc** pauses the drive. Manual steering works on and off the road. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
+
+## Explore a world
+
+The default seed is `83472`. Choose **New world** from the start or pause screen to generate another seed. Share or reload the resulting URL to reproduce its road and scenery. You can also enter a seed directly, for example `?seed=275`. **Restart** returns to the beginning of the current seed.
+
+Landscape types blend along a continuous height field. Lakes occupy enclosed basins, and the road follows the same elevation as the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window.
+
+## Vehicles
+
+Select a vehicle on the start or pause screen. The **Wayfarer** family wagon feels predictable on gravel. **Redline 92** is a retro coupe with quick turn-in. **Vela** pulls hardest on pavement but loses more traction on rough ground. The **Ridgeline 4×4** keeps climbing on steeper slopes and can cross deeper shallows. Deep water limits each vehicle's progress.
+
+## Measure a drive
+
+1. Open **Performance** and choose a quality preset.
+2. Click **Run benchmark**. After the renderer warms up, the game drives the current seed's opening 600 m at 72 km/h for 30 seconds.
+3. Click **Save JSON** to keep the frame samples, world seed, vehicle, preset, backend, output resolution, and range of internal render scales. Use the same seed, vehicle, viewport, and device pixel ratio to compare presets.
+
+The measurements are elapsed time between browser animation callbacks. They include display pacing and browser overhead. The panel shows rolling FPS, median frame time, and p95 while driving. The benchmark also reports p99 and the count of frames longer than 33.3 ms. A tab switch or viewport resize cancels an in-progress run.
+
+| Preset | Rendering |
+| --- | --- |
+| Standard | Scanned cliff, forest floor, snow, asphalt, and nearby boulders. Uses height-based fog, triplanar terrain relief, instanced vegetation with wind, soft shadows, and planar water reflections. |
+| Cinematic | Screen-space diffuse bounce and ambient occlusion, ray-marched sunbeams, and HDR bloom in addition to Standard. Begins rendering at full resolution, adjusts the 3D resolution under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
+| Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler water and lighting. |
+
+The drive, speed, and starting point are shared across presets.
+
+## Art credits
+
+Poly Haven supplies the [cliff](https://polyhaven.com/a/rock_face_04), [forest floor](https://polyhaven.com/a/forrest_ground_01), [snow](https://polyhaven.com/a/snow_03), [asphalt](https://polyhaven.com/a/worn_asphalt), and [mossy boulders](https://polyhaven.com/a/rock_moss_set_01) under [CC0](https://polyhaven.com/license). The road layout, vehicle, vegetation meshes, and terrain generation are original to Cozy Roads.
+
+## Verify and build
+
+```sh
+npm test
+npm run build
+npm run preview
+```
