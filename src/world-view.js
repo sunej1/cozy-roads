@@ -1,8 +1,9 @@
+import { Meadow } from './meadow.js';
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CHUNK_LENGTH, mix, noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 import { atmosphere, makeSky, makeTerrainMaterial, makeWater, skyEnvironment, SUN } from './landscape.js';
-import { aspen, aspenMaterial, conifer, coniferMaterial, distantConifer, grassMaterial, grassTuft, understory, understoryMaterial } from './forest.js';
+import { aspen, aspenMaterial, conifer, coniferMaterial, distantConifer, understory, understoryMaterial } from './forest.js';
 import { bandBounds, buildTerrain, terrainBand, TERRAIN_STEP as STEP, tileSurface } from './terrain.js';
 
 const paintMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91 });
@@ -80,7 +81,6 @@ function markings(world, start, end) {
   return geometry(position, colors, index);
 }
 
-const grass = grassTuft();
 const shrub = understory();
 const broadleaf = aspen();
 const rock = makeRock();
@@ -134,10 +134,9 @@ function scatter(world, tile, chunkId, band, start, scans) {
   const random = randomFor(world.seed ^ Math.imul(chunkId + 17, 0x7c4a541) ^ Math.imul(band, 0x567721));
   const density = world.section(start + CHUNK_LENGTH * 0.5).trees;
   const [left, right] = bandBounds(band);
-  const treeAttempts = band === 0 ? Math.round(mix(290, 460, smooth(0.73, 1, density))) : 110;
+  const treeAttempts = band === 0 ? Math.round(mix(540, 850, smooth(0.73, 1, density))) : 440;
   const trees = new THREE.InstancedMesh(conifer, coniferMaterial, treeAttempts);
-  const aspens = new THREE.InstancedMesh(broadleaf, aspenMaterial, band === 0 ? 86 : 0);
-  const tufts = new THREE.InstancedMesh(grass, grassMaterial, band === 0 ? 1050 : 150);
+  const aspens = new THREE.InstancedMesh(broadleaf, aspenMaterial, band === 0 ? 155 : 80);
   const shrubs = new THREE.InstancedMesh(shrub, understoryMaterial, band === 0 ? 235 : 38);
   const rocks = new THREE.InstancedMesh(rock, rockMaterial, band === 0 ? 25 : 12);
   const treeTint = new THREE.Color();
@@ -162,7 +161,7 @@ function scatter(world, tile, chunkId, band, start, scans) {
     const y = tileSurface(tile, chunkId, s, row.x + lateral, band);
     const clearing = noise(lateral / 38 + world.seed % 83, s / 57);
     const lookOut = s > -22 && s < 52 && lateral < 0;
-    if (lookOut || y < 3 || y > 153 || random() > row.trees * (0.28 + clearing * 1.01)) continue;
+    if (lookOut || y < 3 || y > 205 || random() > (0.15 + row.trees * .87) * (0.35 + clearing * 1.10)) continue;
     const scale = (0.65 + random() ** 1.5 * 1.27) * (1 - 0.36 * smooth(63, 151, y)) * (1 + woodland * 0.24);
     dummy.position.set(row.x + lateral, y - 0.26, -s);
     dummy.rotation.set((random() - 0.5) * 0.17, random() * Math.PI * 2, (random() - 0.5) * 0.11);
@@ -170,7 +169,7 @@ function scatter(world, tile, chunkId, band, start, scans) {
     dummy.scale.set(breadth, scale, breadth);
     dummy.updateMatrix();
     treeTint.setRGB(0.71 + random() * 0.27, 0.82 + random() * 0.18, 0.76 + random() * 0.29);
-    const grove = band === 0 && y < 83 && Math.abs(lateral) < 143 ? noise(lateral * 0.026 + 79, s * 0.025 + 11) : 0;
+    const grove = y < 100 ? noise(lateral * 0.026 + 79, s * 0.025 + 11) : 0;
     if (aspensPlanted < aspens.count && grove > 0.60) {
       aspens.setMatrixAt(aspensPlanted, dummy.matrix);
       aspens.setColorAt(aspensPlanted++, treeTint.setRGB(1.25 + grove * 0.37, 0.96, 0.61));
@@ -229,25 +228,6 @@ function scatter(world, tile, chunkId, band, start, scans) {
   nearStones.castShadow = nearStones.receiveShadow = true;
 
   const grassTint = new THREE.Color();
-  const moss = new THREE.Color('#454d32');
-  const rye = new THREE.Color('#9e9055');
-  let grassCount = 0;
-  for (let i = 0; i < tufts.count; i++) {
-    const s = start + random() * CHUNK_LENGTH;
-    const offset = band === 0 ? (i % 2 ? 1 : -1) * (5.05 + random() ** 2.1 * 49) : mix(left, right, random());
-    const x = world.centerX(s) + offset;
-    const y = tileSurface(tile, chunkId, s, x, band);
-    if (y < -0.03 || y > 181 || noise(offset * 0.39, s * 0.21) < 0.29) continue;
-    dummy.position.set(x, y - 0.037, -s);
-    dummy.rotation.set(0, random() * Math.PI * 2, 0);
-    dummy.scale.setScalar(0.48 + random() * 0.89);
-    dummy.updateMatrix();
-    grassTint.copy(moss).lerp(rye, random() ** 1.4);
-    tufts.setMatrixAt(grassCount, dummy.matrix);
-    tufts.setColorAt(grassCount++, grassTint);
-  }
-  tufts.count = grassCount;
-
   let shrubCount = 0;
   const leaves = new THREE.Color('#6b9e52');
   const pale = new THREE.Color('#efdd96');
@@ -267,7 +247,7 @@ function scatter(world, tile, chunkId, band, start, scans) {
     shrubs.setColorAt(shrubCount++, grassTint.copy(leaves).lerp(pale, smooth(0.51, 0.87, cover)));
   }
   shrubs.count = shrubCount;
-  return { trees, aspens, rocks, nearStones, scanned, tufts, shrubs };
+  return { trees, aspens, rocks, nearStones, scanned, shrubs };
 }
 
 function delineators(world, start, end) {
@@ -344,8 +324,9 @@ export class WorldView {
       this.worker = null;
     }
     this.chunks = new Map();
-    this.terrainMaterial = makeTerrainMaterial(assets);
-    this.lowTerrainMaterial = makeTerrainMaterial(assets, true);
+    this.meadow = new Meadow(scene, world, (s,x) => this.surfaceHeight(s,x));
+    this.terrainMaterial = makeTerrainMaterial();
+    this.lowTerrainMaterial = makeTerrainMaterial(true);
     this.roadMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true, map: assets.pavement, normalMap: assets.normal,
       normalScale: new THREE.Vector2(0.58, 0.58), roughnessMap: assets.rough, roughness: 0.97,
@@ -411,11 +392,11 @@ export class WorldView {
       chunk.add(road, lines, delineators(world, start, end), ...rails);
     }
 
-    const { trees, aspens, rocks, nearStones, scanned, tufts, shrubs } = scatter(world, tile, id, band, start, band === 0 ? this.rockModels : []);
+    const { trees, aspens, rocks, nearStones, scanned, shrubs } = scatter(world, tile, id, band, start, band === 0 ? this.rockModels : []);
     trees.castShadow = aspens.castShadow = rocks.castShadow = true;
-    trees.receiveShadow = aspens.receiveShadow = rocks.receiveShadow = tufts.receiveShadow = shrubs.receiveShadow = true;
-    chunk.add(trees, aspens, rocks, nearStones, ...scanned, tufts, shrubs);
-    this.chunks.set(id + ':' + band, { id, band, tile, chunk, groundMesh, water, trees, aspens, rocks, nearStones, scanned, tufts, shrubs, treeCount: trees.count });
+    trees.receiveShadow = aspens.receiveShadow = rocks.receiveShadow = shrubs.receiveShadow = true;
+    chunk.add(trees, aspens, rocks, nearStones, ...scanned, shrubs);
+    this.chunks.set(id + ':' + band, { id, band, tile, chunk, groundMesh, water, trees, aspens, rocks, nearStones, scanned, shrubs, treeCount: trees.count });
     this.scene.add(chunk);
   }
 
@@ -478,8 +459,9 @@ export class WorldView {
       }
     }
 
+    this.meadow.update(car, low);
     const currentBand = terrainBand(lateral);
-    for (const { id, band, trees, aspens, rocks, nearStones, scanned, tufts, shrubs, treeCount } of this.chunks.values()) {
+    for (const { id, band, trees, aspens, rocks, nearStones, scanned, shrubs, treeCount } of this.chunks.values()) {
       const rowDistance = Math.abs(id - current);
       const near = rowDistance <= 1 && band === currentBand;
       trees.visible = treeCount > 0 && rowDistance <= (low ? 6 : 8);
@@ -492,7 +474,6 @@ export class WorldView {
       nearStones.visible = useScans;
       for (const batch of scanned) batch.visible = useScans && batch.count > 0;
       trees.count = low ? Math.floor(treeCount * 0.69) : treeCount;
-      tufts.visible = !low && tufts.count > 0 && rowDistance <= 2 && band === currentBand;
       shrubs.visible = !low && shrubs.count > 0 && near;
     }
   }

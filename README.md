@@ -33,7 +33,7 @@ The measurements are elapsed time between browser animation callbacks. They incl
 
 | Preset | Rendering |
 | --- | --- |
-| Standard | Scanned terrain surfaces with rock strata and patchy snow, wind-animated pines and aspens, roadside undergrowth, soft sun shadows, and planar lake reflections. |
+| Standard | Procedural meadow, shale and snow surfaces with carved gullies, wind-animated pines and aspens, grass patches that stream around the car, soft sun shadows, and planar lake reflections. |
 | Cinematic | Screen-space diffuse bounce and ambient occlusion, ray-marched sunbeams, and HDR bloom in addition to Standard. Begins rendering at full resolution, adjusts the 3D resolution under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
 | Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler terrain, water, and lighting. |
 
@@ -41,7 +41,7 @@ The drive, speed, and starting point are shared across presets.
 
 ## Art credits
 
-Poly Haven supplies the [cliff](https://polyhaven.com/a/rock_face_04), [forest floor](https://polyhaven.com/a/forrest_ground_01), [snow](https://polyhaven.com/a/snow_03), [asphalt](https://polyhaven.com/a/worn_asphalt), and [mossy boulders](https://polyhaven.com/a/rock_moss_set_01) under [CC0](https://polyhaven.com/license). The road layout, vehicle, vegetation meshes, and terrain generation are original to Cozy Roads.
+Cozy Roads generates its terrain shapes and materials, vegetation, and vehicle meshes. Poly Haven supplies the [asphalt](https://polyhaven.com/a/worn_asphalt) and [mossy boulders](https://polyhaven.com/a/rock_moss_set_01) under [CC0](https://polyhaven.com/license).
 
 ## Verify and build
 

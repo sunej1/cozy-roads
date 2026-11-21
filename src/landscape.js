@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu';
+import { randomFor } from './route.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import {
   attribute, cameraPosition, color, dot, float, fog, mix, normalViewGeometry, normalWorldGeometry, positionView, positionWorld, reflector,
-  mx_noise_float, screenUV, smoothstep, texture, triplanarTexture, uniform, vec2, vec3, vertexColor,
+  screenUV, smoothstep, texture, uniform, vec2, vec3, vertexColor,
 } from 'three/tsl';
 
 export const SUN = new THREE.Vector3(-0.84, 0.48, 0.23).normalize();
@@ -130,45 +131,52 @@ export function makeWater() {
   return { anchor, clock, material, lowMaterial };
 }
 
-export function makeTerrainMaterial(assets, low = false) {
-  const material = new THREE.MeshStandardNodeMaterial();
-  if (low) {
-    const floor = texture(assets.floor, positionWorld.xz.mul(0.24)).r;
-    material.colorNode = vertexColor().rgb.mul(floor.mul(0.85).add(0.74));
-    material.roughness = 0.91;
-    return material;
+// Four seamless, band-limited noise fields. Hardware mipmaps filter the grain
+// at distance, and world-space projections carry continuously across terrain rows.
+function groundNoise() {
+  const size=256, pixels=new Uint8Array(size*size*4), random=randomFor(92048);
+  for(const [channel,frequency] of [5,17,43,128].entries()) {
+    const values=Float32Array.from({length:frequency*frequency},()=>random());
+    const value=(x,y)=>values[(y%frequency)*frequency+(x%frequency)];
+    for(let y=0;y<size;y++) for(let x=0;x<size;x++) {
+      const u=x*frequency/size, v=y*frequency/size, i=Math.floor(u), j=Math.floor(v);
+      const a=u-i, b=v-j, fx=a*a*(3-2*a), fy=b*b*(3-2*b);
+      const top=THREE.MathUtils.lerp(value(i,j),value(i+1,j),fx);
+      const bottom=THREE.MathUtils.lerp(value(i,j+1),value(i+1,j+1),fx);
+      pixels[(y*size+x)*4+channel]=Math.round(255*THREE.MathUtils.lerp(top,bottom,fy));
+    }
   }
-  const normal = normalWorldGeometry.normalize().toVar();
-  const rockFace = smoothstep(0.36, 0.83, normal.y).oneMinus();
-  const slope = rockFace.max(smoothstep(67, 151, positionWorld.y)).toVar();
-  const zoom = positionWorld.sub(cameraPosition).length();
-  const rockPos = vec3(positionWorld.x.add(positionWorld.y.mul(0.28)), positionWorld.y, positionWorld.z);
-  const rock = map => triplanarTexture(texture(map), null, null, float(0.15), rockPos, normal);
-  const floorUV = positionWorld.xz.mul(0.35);
-  const landBreakup = mx_noise_float(positionWorld.xz.mul(0.028), 1.7, 0.5).clamp(0, 1).toVar();
-  const stoneBreakup = mx_noise_float(vec3(positionWorld.x.mul(0.094), positionWorld.y.mul(0.18), positionWorld.z.mul(0.094)), 1.45, 0.5).clamp(0, 1).toVar();
-  const treeFloor = texture(assets.floor, floorUV).rgb.toVar();
-  const patches = texture(assets.floor, positionWorld.xz.mul(0.047).add(vec2(0.13, 0.51))).rgb.toVar();
-  const cliff = rock(assets.cliff).rgb.toVar();
-  const floorColor = mix(treeFloor, patches, 0.31).mul(mix(color('#becdaf'), color('#e1d3a2'), landBreakup)).mul(1.10);
-  const beds = positionWorld.y.mul(0.31).add(positionWorld.x.mul(0.101), positionWorld.z.mul(-0.072), stoneBreakup.mul(1.8)).sin();
-  const layers = beds.mul(stoneBreakup.mul(0.19).add(0.065)).add(0.94);
-  const cliffColor = cliff.mul(mix(color('#b1cbd3'), color('#ecd5ad'), landBreakup)).mul(layers).mul(1.82);
-  const windline = landBreakup.mul(92).add(stoneBreakup.mul(37));
-  const drift = smoothstep(179, 239, positionWorld.y.add(windline))
-    .mul(smoothstep(0.21, 0.79, normal.y)).toVar();
-  const snow = texture(assets.snow, positionWorld.xz.mul(0.12)).rgb.mul(color('#cfdfef'));
-  const near = mix(mix(floorColor, cliffColor, slope), snow, drift);
-  const macro = vertexColor().rgb.mul(landBreakup.mul(0.43).add(0.78));
-  const detail = smoothstep(48, 780, zoom).oneMinus().mul(0.47).add(0.29);
-  const talus = smoothstep(0.46, 0.74, stoneBreakup).mul(slope.mul(0.85).add(0.15));
-  const ground = mix(macro, near, detail).mul(talus.mul(0.20).add(0.91));
-  const shallow = smoothstep(0.1, 2.7, positionWorld.y).oneMinus().mul(slope.oneMinus());
-  material.colorNode = mix(ground, ground.mul(color('#bba788')).mul(1.35), shallow.mul(0.7));
-  material.roughnessNode = mix(mix(0.97, 0.79, slope), 0.64, drift.max(shallow.mul(0.51)));
+  const map=new THREE.DataTexture(pixels,size,size);
+  map.wrapS=map.wrapT=THREE.RepeatWrapping;
+  map.generateMipmaps=true;
+  map.minFilter=THREE.LinearMipmapLinearFilter;
+  map.magFilter=THREE.LinearFilter;
+  map.anisotropy=4;
+  map.needsUpdate=true;
+  return map;
+}
 
-  const relief = mix(texture(assets.floorRelief, floorUV).r.mul(0.12), rock(assets.cliffRelief).r.mul(0.36), slope)
-    .mul(smoothstep(25, 190, zoom).oneMinus()).mul(drift.mul(0.76).oneMinus()).toVar();
+const mineralNoise=groundNoise();
+export function makeTerrainMaterial(low=false) {
+  const material=new THREE.MeshStandardNodeMaterial();
+  const p=positionWorld, nWorld=normalWorldGeometry.normalize();
+  const projection=vec2(p.x.add(p.z.mul(.31)),p.z.sub(p.x.mul(.24)).add(p.y.mul(.74)));
+  const field=texture(mineralNoise,projection.mul(.0062)).toVar();
+  const grain=texture(mineralNoise,vec2(p.z.add(p.y.mul(.71)),p.x.sub(p.y.mul(.34))).mul(.155)).toVar();
+  const meadow=mix(color('#476638'),color('#aba665'),field.r.mul(.52).add(field.g.mul(.36),field.b.mul(.12)));
+  const mineral=field.b.mul(.47).add(field.g.mul(.30),grain.g.mul(.23));
+  const bedding=p.y.mul(.40).add(p.x.mul(.073),p.z.mul(.095),field.g.mul(6)).sin().mul(.09).add(.95);
+  const stone=mix(color('#4a5355'),color('#acaaa0'),mineral).mul(bedding);
+  const exposed=smoothstep(.38,.82,nWorld.y).oneMinus().max(smoothstep(97,190,p.y.add(field.r.mul(40))));
+  const snow=smoothstep(186,239,p.y.add(field.r.mul(52),field.b.mul(27))).mul(smoothstep(.34,.84,nWorld.y));
+  const coarse=mix(mix(meadow,stone,exposed),mix(color('#a9bac7'),color('#f1f4ef'),field.b),snow);
+  const grit=grain.a.mul(.26).add(grain.b.mul(.23),.76);
+  material.colorNode=mix(vertexColor().rgb,coarse,.74).mul(grit);
+  material.roughnessNode=mix(.94,.74,snow);
+  if(low) return material;
+  const zoom=p.sub(cameraPosition).length();
+  const relief=grain.b.mul(.050).add(grain.a.mul(.017),grain.g.mul(exposed).mul(.16),field.b.mul(exposed).mul(.63))
+    .mul(smoothstep(40,260,zoom).oneMinus()).toVar();
   const n = normalViewGeometry.normalize();
   const dx = positionView.dFdx();
   const dy = positionView.dFdy();

@@ -7,7 +7,12 @@ const negativeColumns = [
   -250, -228, -208, -190, -171, -153, -136, -119, -103, -89, -77, -65, -55,
   -47, -40, -33, -27, -22, -17, -13, -10, -8, -6.4, -ROAD_EDGE,
 ];
-export const TERRAIN_COLUMNS = [...negativeColumns, 0, ...negativeColumns.slice().reverse().map(n => -n)];
+const refined = negativeColumns.flatMap((x, i) => {
+  const next = negativeColumns[i + 1] ?? 0;
+  const count = Math.ceil((next - x) / 24);
+  return Array.from({length: count}, (_, j) => mix(x, next, j / count));
+});
+export const TERRAIN_COLUMNS = [...refined, 0, ...refined.slice().reverse().map(n => -n)];
 const BAND_WIDTH = 768;
 const MAIN_EDGE = TERRAIN_COLUMNS.at(-1);
 

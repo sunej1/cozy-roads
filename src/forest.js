@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
+import { cameraPosition, positionWorld, smoothstep, positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { randomFor } from './route.js';
 
@@ -27,10 +27,10 @@ function branchAtlas() {
   ctx.lineCap = 'round';
   const needleColors = ['#334a32', '#435937', '#506940', '#61794d', '#72935c', '#8c9e63'];
   for (let layer = 0; layer < 2; layer++) {
-    for (let i = 0; i < 26; i++) {
-      const t = i / 26;
+    for (let i = 0; i < 18; i++) {
+      const t = (i + random()*.45) / 18;
       const y = 228 - 205 * t;
-      const reach = (0.24 + 0.76 * Math.sin(t * Math.PI) ** 0.64) * (1 - 0.59 * t) * 164;
+      const reach = (0.16 + 0.74 * Math.sin(t * Math.PI) ** 0.64) * (1 - 0.59 * t) * 164;
       for (const side of [-1, 1]) {
         const tipX = 188 + side * reach * (0.64 + random() * 0.38);
         const tipY = y - (12 + random() * 23) * (1 - 0.42 * t);
@@ -41,14 +41,14 @@ function branchAtlas() {
         ctx.quadraticCurveTo((tipX + 188) * 0.5, y + 7, tipX, tipY);
         ctx.stroke();
 
-        for (let leaf = 0; leaf < 24; leaf++) {
-          const u = leaf / 24;
+        for (let leaf = 0; leaf < 15; leaf++) {
+          const u = leaf / 15;
           const x = 188 + (tipX - 188) * u;
           const sy = y + (tipY - y) * u * u;
           const span = (5 + 17 * (1 - u) * (0.45 + random())) * (1 - t * 0.31);
           for (const pitch of [-1, 1]) {
             ctx.strokeStyle = needleColors[Math.floor(random() * needleColors.length)];
-            ctx.lineWidth = (layer ? 1.15 : 1.95) + random() * 1.25;
+            ctx.lineWidth = (layer ? 1.15 : 1.65) + random() * 1.05;
             ctx.beginPath();
             ctx.moveTo(x, sy);
             ctx.lineTo(x + side * span * 0.76, sy + pitch * span * (0.41 + random() * 0.43));
@@ -70,7 +70,7 @@ export const coniferMaterial = new THREE.MeshStandardNodeMaterial({
   map: foliageMap, roughness: 0.92, vertexColors: true, alphaTest: 0.30, side: THREE.DoubleSide,
   emissive: '#233b22', emissiveMap: foliageMap, emissiveIntensity: 0.3,
 });
-export const grassMaterial = new THREE.MeshStandardNodeMaterial({ roughness: 1, side: THREE.DoubleSide });
+export const grassMaterial = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide });
 export const understoryMaterial = new THREE.MeshStandardNodeMaterial({
   roughness: 0.91, side: THREE.DoubleSide, vertexColors: true, emissive: '#283113', emissiveIntensity: 0.22,
 });
@@ -112,6 +112,10 @@ export const aspenMaterial = new THREE.MeshStandardNodeMaterial({
   map: broadleafMap, roughness: 0.91, alphaTest: 0.40, side: THREE.DoubleSide,
   emissiveMap: broadleafMap, emissive: '#665831', emissiveIntensity: 0.3,
 });
+
+for (const material of [coniferMaterial,aspenMaterial]) {
+  material.alphaTestNode = smoothstep(1.8,6.8,positionWorld.sub(cameraPosition).length()).oneMinus().mul(.80).add(material.alphaTest);
+}
 
 function windBend(height, amplitude) {
   const space = positionLocal.x.mul(0.068).add(positionLocal.z.mul(0.11));
@@ -159,16 +163,16 @@ function branchTree(detail, seed) {
 
   for (let tier = 0; tier < detail; tier++) {
     const fraction = tier / (detail - 1);
-    const y = 1.48 + 5.95 * fraction;
+    const y = 1.12 + 6.42 * fraction;
     const reach = 2.43 * Math.pow(1 - fraction * 0.94, 0.91);
-    const arms = tier < detail * 0.7 ? 5 : 4;
+    const arms = tier < detail * 0.7 ? 7 : 5;
     for (let arm = 0; arm < arms; arm++) {
       const angle = (arm / arms + tier * 0.093) * Math.PI * 2 + random() * 0.32;
       const x = Math.cos(angle);
       const z = Math.sin(angle);
       const length = reach * (0.77 + random() * 0.42);
-      const width = length * (0.32 + random() * 0.12);
-      const tip = y + (0.33 + fraction * 0.56) * (0.48 + random() * 0.89) - length * 0.15;
+      const width = length * (0.23 + random() * 0.15);
+      const tip = y + (0.12 + fraction * 0.65) * (0.3 + random()) - length * (0.15 + random() * 0.28);
       const shade = 0.73 + fraction * 0.18 + random() * 0.11;
       tint.setRGB(shade * 0.88, shade, shade * 0.85);
       const i = positions.length / 3;
@@ -193,7 +197,7 @@ function branchTree(detail, seed) {
   return shape;
 }
 
-export const conifer = branchTree(13, 3108);
+export const conifer = branchTree(15, 3108);
 export const distantConifer = branchTree(6, 5219);
 
 export function aspen() {
@@ -233,29 +237,41 @@ export function aspen() {
 
 export function grassTuft() {
   const random = randomFor(55217);
-  const positions = [];
-  const indices = [];
-  for (let i = 0; i < 8; i++) {
-    const angle = i * 2.399 + random() * 0.6;
-    const bend = 0.07 + random() * 0.2;
-    const height = 0.25 + random() * 0.52;
-    const width = 0.018 + random() * 0.018;
-    const dx = Math.cos(angle) * width;
-    const dz = Math.sin(angle) * width;
-    const x = (random() - 0.5) * 0.18;
-    const z = (random() - 0.5) * 0.18;
-    const k = positions.length / 3;
-    positions.push(x - dx, 0, z - dz, x + dx, 0, z + dz,
-      x + dx + bend * 0.38, height * 0.56, z + dz + bend * 0.2,
-      x + bend, height, z + bend * 0.5,
-      x - dx + bend * 0.38, height * 0.56, z - dz + bend * 0.2);
-    indices.push(k, k + 1, k + 4, k + 1, k + 2, k + 4, k + 2, k + 3, k + 4);
+  const positions = [],
+    colors = [],
+    normals = [],
+    indices = [];
+  for (let i = 0; i < 23; i++) {
+    const angle = random() * Math.PI * 2,
+      reach = Math.sqrt(random()) * 0.68;
+    const x = Math.cos(angle) * reach,
+      z = Math.sin(angle) * reach;
+    const heading = angle + (random() - 0.5) * 1.4;
+    const dx = Math.cos(heading),
+      dz = Math.sin(heading);
+    const h = 0.2 + random() * 0.33,
+      width = 0.017 + random() * 0.024,
+      lean = 0.06 + random() * 0.23;
+    const first = positions.length / 3;
+    for (const t of [0, 0.56, 1]) {
+      for (const side of [-1, 1]) {
+        const w = width * (1 - t) * side;
+        positions.push(x + dx * t * t * lean - dz * w, t * h, z + dz * t * t * lean + dx * w);
+        colors.push(0.28 + 0.82 * t, 0.38 + 0.67 * t, 0.19 + 0.45 * t);
+        normals.push(dx * 0.18, 0.98, dz * 0.18);
+      }
+    }
+    indices.push(first, first + 1, first + 2, first + 1, first + 3, first + 2, first + 2, first + 3, first + 4);
   }
-  const shape = new THREE.BufferGeometry();
-  shape.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  shape.setIndex(indices);
-  shape.computeVertexNormals();
-  return shape;
+  const g = new THREE.BufferGeometry();
+  for (const [name, data] of [
+    ['position', positions],
+    ['color', colors],
+    ['normal', normals],
+  ])
+    g.setAttribute(name, new THREE.Float32BufferAttribute(data, 3));
+  g.setIndex(indices);
+  return g;
 }
 
 export function understory() {

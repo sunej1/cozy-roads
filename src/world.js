@@ -6,7 +6,7 @@ export const REGION_LENGTH = 560;
 const BIOMES = [
   { name: 'Lakeshore', grade: 11, hills: 24, ridge: 48, trees: 0.74 },
   { name: 'Pine forest', grade: 24, hills: 34, ridge: 36, trees: 1 },
-  { name: 'Rolling hills', grade: 31, hills: 71, ridge: 44, trees: 0.23 },
+  { name: 'Rolling hills', grade: 31, hills: 71, ridge: 44, trees: 0.39 },
   { name: 'Alpine mountains', grade: 56, hills: 57, ridge: 310, trees: 0.69 },
 ];
 
@@ -123,9 +123,15 @@ export function createWorld(seed = DEFAULT_SEED) {
     const cracks = noise(x / 28 + key - 72, (s + x * 0.22) / 39) - 0.5;
     const range = smooth(34, 476, distance);
     const slope = row.hills * smooth(10, 240, distance) * (0.08 + rolling * 0.94);
-    const massif = row.ridge * range * (0.38 + fold * fold * 0.74 + rolling * 0.54);
+    // Broad valleys break up the ridgeline. Nested gullies run down its flanks.
+    const valley = noise(s / 310 + key + 43, x / 460);
+    const massif = row.ridge * range * (0.21 + fold * fold * 0.81 + rolling * 0.54) * (0.55 + .81 * valley);
+    const channel = (s + warp + x * .21) / 59;
+    const ravine = (1 - Math.abs(Math.sin(channel))) ** 4;
+    const tributary = (1 - Math.abs(Math.sin(channel * 2.7 + rolling * 5))) ** 5;
+    const erosion = range * (row.ridge * .19 + row.hills * .22) * (ravine + .39 * tributary);
     const gravel = smooth(7.5, 30, distance);
-    const base = row.grade + slope + massif + gravel * (hummock * 14 + surface * 2.8) + range * cracks * 46;
+    const base = row.grade + slope + massif - erosion + gravel * (hummock * 14 + surface * 2.8) + range * cracks * 46;
     const shore = shoreDistance(row, lateral);
     if (shore >= 0) return -25 * smooth(0, 92, shore) - 0.5 * smooth(0, 4, shore);
     // The shoulder stays attached to the road even when an irregular bank approaches it.
