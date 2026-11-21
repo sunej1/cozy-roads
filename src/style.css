@@ -22,9 +22,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); o
 #view { display: block; }
 .vignette {
   pointer-events: none;
-  background:
-    linear-gradient(180deg, #101d1eaa, transparent 19%, transparent 70%, #101918b8),
-    linear-gradient(90deg, #16232259, transparent 61%);
+  background: linear-gradient(180deg, #101d1e80, transparent 16%, transparent 78%, #101918b8);
 }
 #game:has(.intro:not([hidden])) .vignette {
   background:

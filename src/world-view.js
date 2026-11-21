@@ -1,7 +1,8 @@
 import * as THREE from 'three/webgpu';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CHUNK_LENGTH, mix, noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 import { atmosphere, makeSky, makeTerrainMaterial, makeWater, skyEnvironment, SUN } from './landscape.js';
-import { conifer, coniferMaterial, distantConifer, grassMaterial, grassTuft } from './forest.js';
+import { aspen, aspenMaterial, conifer, coniferMaterial, distantConifer, grassMaterial, grassTuft, understory, understoryMaterial } from './forest.js';
 import { bandBounds, buildTerrain, terrainBand, TERRAIN_STEP as STEP, tileSurface } from './terrain.js';
 
 const paintMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91 });
@@ -63,7 +64,8 @@ function markings(world, start, end) {
       const i = position.length / 3;
       position.push(x + left, world.roadHeight(s, left) + 0.069, -s);
       position.push(x + right, world.roadHeight(s, right) + 0.069, -s);
-      colors.push(shade.r, shade.g, shade.b, shade.r, shade.g, shade.b);
+      const wear = 0.83 + noise(s * 0.47, left * 2) * 0.17;
+      colors.push(shade.r * wear, shade.g * wear, shade.b * wear, shade.r * wear, shade.g * wear, shade.b * wear);
       if (row) index.push(i - 2, i - 1, i, i - 1, i + 1, i);
     }
   }
@@ -79,9 +81,23 @@ function markings(world, start, end) {
 }
 
 const grass = grassTuft();
+const shrub = understory();
+const broadleaf = aspen();
 const rock = makeRock();
 const railBeam = makeBeam();
 const railPost = new THREE.BoxGeometry(0.12, 1.06, 0.16);
+const roadPost = mergeGeometries([
+  postPart(0.12, 0.92, 0.10, 0.40, '#cdd1c4'),
+  postPart(0.128, 0.16, 0.107, 0.715, '#282e2e'),
+  postPart(0.076, 0.065, 0.116, 0.72, '#de8f48'),
+]);
+
+function postPart(width, height, depth, y, tint) {
+  const shape = new THREE.BoxGeometry(width, height, depth).translate(0, y, 0);
+  const shade = new THREE.Color(tint);
+  shape.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: shape.getAttribute('position').count }, () => shade.toArray()).flat(), 3));
+  return shape;
+}
 
 function makeBeam() {
   const profile = new THREE.Shape();
@@ -120,10 +136,13 @@ function scatter(world, tile, chunkId, band, start, scans) {
   const [left, right] = bandBounds(band);
   const treeAttempts = band === 0 ? Math.round(mix(290, 460, smooth(0.73, 1, density))) : 110;
   const trees = new THREE.InstancedMesh(conifer, coniferMaterial, treeAttempts);
-  const tufts = new THREE.InstancedMesh(grass, grassMaterial, band === 0 ? 630 : 0);
+  const aspens = new THREE.InstancedMesh(broadleaf, aspenMaterial, band === 0 ? 86 : 0);
+  const tufts = new THREE.InstancedMesh(grass, grassMaterial, band === 0 ? 1050 : 150);
+  const shrubs = new THREE.InstancedMesh(shrub, understoryMaterial, band === 0 ? 235 : 38);
   const rocks = new THREE.InstancedMesh(rock, rockMaterial, band === 0 ? 25 : 12);
   const treeTint = new THREE.Color();
   let planted = 0;
+  let aspensPlanted = 0;
   let stones = 0;
   const scanned = scans.map(({ geometry, material }) => {
     const batch = new THREE.InstancedMesh(geometry, material, 4);
@@ -136,8 +155,9 @@ function scatter(world, tile, chunkId, band, start, scans) {
     const s = start + random() * CHUNK_LENGTH;
     const row = world.section(s);
     const woodland = smooth(0.72, 1, row.trees);
+    const nearRoad = i % 7 !== 0;
     const lateral = band === 0
-      ? (random() < 0.5 ? -1 : 1) * (10.5 + random() ** mix(1.23, 1.95, woodland) * 254)
+      ? (random() < 0.5 ? -1 : 1) * (nearRoad ? 10.5 + random() ** mix(1.68, 2.42, woodland) * 436 : mix(410, right, random()))
       : mix(left, right, random());
     const y = tileSurface(tile, chunkId, s, row.x + lateral, band);
     const clearing = noise(lateral / 38 + world.seed % 83, s / 57);
@@ -150,10 +170,17 @@ function scatter(world, tile, chunkId, band, start, scans) {
     dummy.scale.set(breadth, scale, breadth);
     dummy.updateMatrix();
     treeTint.setRGB(0.71 + random() * 0.27, 0.82 + random() * 0.18, 0.76 + random() * 0.29);
+    const grove = band === 0 && y < 83 && Math.abs(lateral) < 143 ? noise(lateral * 0.026 + 79, s * 0.025 + 11) : 0;
+    if (aspensPlanted < aspens.count && grove > 0.60) {
+      aspens.setMatrixAt(aspensPlanted, dummy.matrix);
+      aspens.setColorAt(aspensPlanted++, treeTint.setRGB(1.25 + grove * 0.37, 0.96, 0.61));
+      continue;
+    }
     trees.setMatrixAt(planted, dummy.matrix);
     trees.setColorAt(planted++, treeTint);
   }
   trees.count = planted;
+  aspens.count = aspensPlanted;
   trees.computeBoundingSphere();
 
   for (let i = 0; i < rocks.count; i++) {
@@ -207,9 +234,11 @@ function scatter(world, tile, chunkId, band, start, scans) {
   let grassCount = 0;
   for (let i = 0; i < tufts.count; i++) {
     const s = start + random() * CHUNK_LENGTH;
-    const offset = (i % 3 ? 1 : -1) * (6.0 + random() ** 1.55 * 22);
-    if (noise(offset * 0.57, s * 0.37) < 0.32) continue;
-    dummy.position.set(world.centerX(s) + offset, tileSurface(tile, chunkId, s, world.centerX(s) + offset, band) - 0.03, -s);
+    const offset = band === 0 ? (i % 2 ? 1 : -1) * (5.05 + random() ** 2.1 * 49) : mix(left, right, random());
+    const x = world.centerX(s) + offset;
+    const y = tileSurface(tile, chunkId, s, x, band);
+    if (y < -0.03 || y > 181 || noise(offset * 0.39, s * 0.21) < 0.29) continue;
+    dummy.position.set(x, y - 0.037, -s);
     dummy.rotation.set(0, random() * Math.PI * 2, 0);
     dummy.scale.setScalar(0.48 + random() * 0.89);
     dummy.updateMatrix();
@@ -218,7 +247,45 @@ function scatter(world, tile, chunkId, band, start, scans) {
     tufts.setColorAt(grassCount++, grassTint);
   }
   tufts.count = grassCount;
-  return { trees, rocks, nearStones, scanned, tufts };
+
+  let shrubCount = 0;
+  const leaves = new THREE.Color('#6b9e52');
+  const pale = new THREE.Color('#efdd96');
+  for (let i = 0; i < shrubs.count; i++) {
+    const s = start + random() * CHUNK_LENGTH;
+    const offset = band === 0 ? (i % 2 ? 1 : -1) * (5.7 + random() ** 1.55 * 74) : mix(left, right, random());
+    const x = world.centerX(s) + offset;
+    const y = tileSurface(tile, chunkId, s, x, band);
+    const cover = noise(offset * 0.16 + 38, s * 0.12);
+    if (y < -0.03 || y > 124 || cover < 0.44) continue;
+    dummy.position.set(x, y - 0.018, -s);
+    dummy.rotation.set(0, random() * Math.PI * 2, 0);
+    const size = 0.39 + random() ** 1.4 * 1.13;
+    dummy.scale.set(size, size * (0.54 + random() * 0.57), size);
+    dummy.updateMatrix();
+    shrubs.setMatrixAt(shrubCount, dummy.matrix);
+    shrubs.setColorAt(shrubCount++, grassTint.copy(leaves).lerp(pale, smooth(0.51, 0.87, cover)));
+  }
+  shrubs.count = shrubCount;
+  return { trees, aspens, rocks, nearStones, scanned, tufts, shrubs };
+}
+
+function delineators(world, start, end) {
+  const stride = 32;
+  const mesh = new THREE.InstancedMesh(roadPost, paintMaterial, Math.ceil((end - start) / stride) * 2);
+  let count = 0;
+  for (let s = start + 12; s < end; s += stride) {
+    for (const side of [-1, 1]) {
+      const lateral = side * 5.80;
+      dummy.position.set(world.centerX(s) + lateral, world.terrainHeight(s, lateral), -s);
+      dummy.rotation.set(0, world.routePose(s).yaw, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(count++, dummy.matrix);
+    }
+  }
+  mesh.count = count;
+  return mesh;
 }
 
 function railing(world, start, end) {
@@ -278,6 +345,7 @@ export class WorldView {
     }
     this.chunks = new Map();
     this.terrainMaterial = makeTerrainMaterial(assets);
+    this.lowTerrainMaterial = makeTerrainMaterial(assets, true);
     this.roadMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true, map: assets.pavement, normalMap: assets.normal,
       normalScale: new THREE.Vector2(0.58, 0.58), roughnessMap: assets.rough, roughness: 0.97,
@@ -287,18 +355,18 @@ export class WorldView {
     this.sky = makeSky();
     this.water = makeWater();
     scene.environment = skyEnvironment();
-    scene.environmentIntensity = 0.67;
+    scene.environmentIntensity = 0.74;
 
-    const skyLight = new THREE.HemisphereLight('#dceafa', '#78906d', 0.88);
-    this.sun = new THREE.DirectionalLight('#ffd8a4', 2.95);
+    const skyLight = new THREE.HemisphereLight('#c6deff', '#a39c77', 0.99);
+    this.sun = new THREE.DirectionalLight('#ffe8c5', 3.28);
     this.sun.position.copy(SUN).multiplyScalar(125);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(this.sun.shadow.camera, { left: -63, right: 63, top: 63, bottom: -63, near: 10, far: 285 });
+    Object.assign(this.sun.shadow.camera, { left: -56, right: 56, top: 56, bottom: -56, near: 10, far: 285 });
     this.sun.shadow.camera.updateProjectionMatrix();
-    this.sun.shadow.normalBias = 0.13;
-    this.sun.shadow.bias = -0.00013;
-    this.sun.shadow.radius = 2.55;
+    this.sun.shadow.normalBias = 0.068;
+    this.sun.shadow.bias = -0.00022;
+    this.sun.shadow.radius = 2.12;
     scene.add(this.sky, this.water.anchor, skyLight, this.sun, this.sun.target);
   }
 
@@ -312,7 +380,7 @@ export class WorldView {
     ground.setAttribute('normal', new THREE.BufferAttribute(tile.normal, 3));
     ground.setAttribute('color', new THREE.BufferAttribute(tile.color, 3));
     ground.setIndex(new THREE.BufferAttribute(tile.index, 1));
-    const groundMesh = new THREE.Mesh(ground, this.terrainMaterial);
+    const groundMesh = new THREE.Mesh(ground, this.low ? this.lowTerrainMaterial : this.terrainMaterial);
     groundMesh.receiveShadow = true;
     chunk.add(groundMesh);
 
@@ -340,14 +408,14 @@ export class WorldView {
       road.receiveShadow = lines.receiveShadow = true;
       const rails = railing(world, start, end);
       rails.forEach(rail => { rail.castShadow = true; });
-      chunk.add(road, lines, ...rails);
+      chunk.add(road, lines, delineators(world, start, end), ...rails);
     }
 
-    const { trees, rocks, nearStones, scanned, tufts } = scatter(world, tile, id, band, start, band === 0 ? this.rockModels : []);
-    trees.castShadow = rocks.castShadow = true;
-    trees.receiveShadow = rocks.receiveShadow = tufts.receiveShadow = true;
-    chunk.add(trees, rocks, nearStones, ...scanned, tufts);
-    this.chunks.set(id + ':' + band, { id, band, tile, chunk, water, trees, rocks, nearStones, scanned, tufts, treeCount: trees.count });
+    const { trees, aspens, rocks, nearStones, scanned, tufts, shrubs } = scatter(world, tile, id, band, start, band === 0 ? this.rockModels : []);
+    trees.castShadow = aspens.castShadow = rocks.castShadow = true;
+    trees.receiveShadow = aspens.receiveShadow = rocks.receiveShadow = tufts.receiveShadow = shrubs.receiveShadow = true;
+    chunk.add(trees, aspens, rocks, nearStones, ...scanned, tufts, shrubs);
+    this.chunks.set(id + ':' + band, { id, band, tile, chunk, groundMesh, water, trees, aspens, rocks, nearStones, scanned, tufts, shrubs, treeCount: trees.count });
     this.scene.add(chunk);
   }
 
@@ -410,27 +478,31 @@ export class WorldView {
       }
     }
 
-    for (const { id, band, trees, rocks, nearStones, scanned, tufts, treeCount } of this.chunks.values()) {
+    const currentBand = terrainBand(lateral);
+    for (const { id, band, trees, aspens, rocks, nearStones, scanned, tufts, shrubs, treeCount } of this.chunks.values()) {
       const rowDistance = Math.abs(id - current);
-      const near = rowDistance <= 1 && band === terrainBand(lateral);
+      const near = rowDistance <= 1 && band === currentBand;
       trees.visible = treeCount > 0 && rowDistance <= (low ? 6 : 8);
       trees.geometry = near && !low ? conifer : distantConifer;
       trees.castShadow = near;
+      aspens.visible = aspens.count > 0 && rowDistance <= (low ? 3 : 6);
+      aspens.castShadow = near;
       const useScans = near && !low && scanned.length > 0;
       rocks.visible = !useScans;
       nearStones.visible = useScans;
       for (const batch of scanned) batch.visible = useScans && batch.count > 0;
       trees.count = low ? Math.floor(treeCount * 0.69) : treeCount;
-      tufts.visible = !low && tufts.count > 0 && rowDistance <= 2;
+      tufts.visible = !low && tufts.count > 0 && rowDistance <= 2 && band === currentBand;
+      shrubs.visible = !low && shrubs.count > 0 && near;
     }
   }
 
   setQuality(low) {
     this.far.value = low ? 1040 : 1420;
     this.low = low;
-    const material = low ? this.water.lowMaterial : this.water.material;
-    for (const { water } of this.chunks.values()) {
-      if (water) water.material = material;
+    for (const { groundMesh, water } of this.chunks.values()) {
+      groundMesh.material = low ? this.lowTerrainMaterial : this.terrainMaterial;
+      if (water) water.material = low ? this.water.lowMaterial : this.water.material;
     }
   }
 

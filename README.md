@@ -33,9 +33,9 @@ The measurements are elapsed time between browser animation callbacks. They incl
 
 | Preset | Rendering |
 | --- | --- |
-| Standard | Scanned cliff, forest floor, snow, asphalt, and nearby boulders. Uses height-based fog, triplanar terrain relief, instanced vegetation with wind, soft shadows, and planar water reflections. |
+| Standard | Scanned terrain surfaces with rock strata and patchy snow, wind-animated pines and aspens, roadside undergrowth, soft sun shadows, and planar lake reflections. |
 | Cinematic | Screen-space diffuse bounce and ambient occlusion, ray-marched sunbeams, and HDR bloom in addition to Standard. Begins rendering at full resolution, adjusts the 3D resolution under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
-| Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler water and lighting. |
+| Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler terrain, water, and lighting. |
 
 The drive, speed, and starting point are shared across presets.
 

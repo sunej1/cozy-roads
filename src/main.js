@@ -175,15 +175,16 @@ function poseScene(blend) {
   if (mode === 'ready' || automatic) {
     const intro = mode === 'ready';
     const lookAhead = intro ? 34 : 17;
-    const back = intro ? 10.1 : 8.6;
-    desiredCamera.set(world.centerX(s - back) + (intro ? 1.9 : 0), y + (intro ? 3.95 : 3.15), -s + back);
+    const back = intro ? 9.7 : 7.75;
+    desiredCamera.set(world.centerX(s - back) + (intro ? 3.15 : 1.10), y + (intro ? 3.52 : 2.92), -s + back);
     desiredTarget.set(world.centerX(s + lookAhead) - (intro ? 21 : 0),
       world.roadHeight(s + lookAhead) + (intro ? 4.7 : 1.55), -s - lookAhead);
   } else {
-    const back = 8.5;
-    const cameraX = x - forwardX * back;
-    const cameraS = s - forwardS * back;
-    const cameraY = Math.max(y + 3.3, height(cameraS, cameraX) + 1.7);
+    const back = 7.95;
+    const shoulder = 0.74;
+    const cameraX = x - forwardX * back + forwardS * shoulder;
+    const cameraS = s - forwardS * back - forwardX * shoulder;
+    const cameraY = Math.max(y + 2.97, height(cameraS, cameraX) + 1.7);
     const ahead = 15;
     const targetX = x + forwardX * ahead;
     const targetS = s + forwardS * ahead;
