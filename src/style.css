@@ -71,6 +71,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); o
   max-width: min(740px, calc(100% - 40px));
   text-shadow: 0 2px 25px #142620b3;
 }
+.credits { color: #e2e8de; font-size: .78rem; text-underline-offset: .2em; }
 .intro h1 {
   margin: 0;
   font: 400 clamp(3.2rem, 7.1vw, 7rem)/.97 "Iowan Old Style", "Palatino Linotype", Georgia, serif;

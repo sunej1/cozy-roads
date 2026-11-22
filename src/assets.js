@@ -5,10 +5,10 @@ import asphaltNormal from '../assets/asphalt-normal.jpg';
 import asphaltRough from '../assets/asphalt-rough.jpg';
 import boulders from '../assets/mossy-boulders.glb?url';
 
-async function loadElevations() {
-  const response = await fetch(new URL('../assets/shuksan.u16', import.meta.url));
-  if (!response.ok) throw new Error('Could not load mountain elevations');
-  return new Uint16Array(await response.arrayBuffer());
+async function loadField(url, ArrayType) {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error('Could not load ' + url.pathname);
+  return new ArrayType(await response.arrayBuffer());
 }
 
 export async function loadLandscapeAssets() {
@@ -21,9 +21,10 @@ export async function loadLandscapeAssets() {
     return map;
   }
 
-  const [pavement, normal, rough, scans, elevations] = await Promise.all([
+  const [pavement, normal, rough, scans, elevations, clouds] = await Promise.all([
     load(asphaltColor, true), load(asphaltNormal), load(asphaltRough),
-    new GLTFLoader().loadAsync(boulders), loadElevations(),
+    new GLTFLoader().loadAsync(boulders), loadField(new URL('../assets/shuksan.u16', import.meta.url), Uint16Array),
+    loadField(new URL('../assets/cloud-field.u8', import.meta.url), Uint8Array),
   ]);
   const rocks = [];
   scans.scene.traverse(object => {
@@ -41,5 +42,5 @@ export async function loadLandscapeAssets() {
     }
     rocks.push({ geometry, material: object.material });
   });
-  return { pavement, normal, rough, rocks, elevations };
+  return { pavement, normal, rough, rocks, elevations, clouds };
 }

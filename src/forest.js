@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { cameraPosition, positionWorld, smoothstep, positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
+import { cameraPosition, positionWorld, referenceAttribute, smoothstep, uniform, positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { randomFor } from './route.js';
 
@@ -125,7 +125,13 @@ function windBend(height, amplitude) {
 }
 coniferMaterial.positionNode = windBend(8.2, 0.24);
 aspenMaterial.positionNode = windBend(6.6, 0.31);
-grassMaterial.positionNode = windBend(0.81, 0.23);
+
+export const meadowCenter = uniform(new THREE.Vector2());
+export const meadowRange = uniform(new THREE.Vector2(24, 56));
+const tuftRoot = referenceAttribute('instanceMatrix', 'mat4').element(3).xyz;
+const grassScale = smoothstep(meadowRange.x, meadowRange.y, tuftRoot.xz.sub(meadowCenter).length()).oneMinus();
+grassMaterial.positionNode = tuftRoot.add(windBend(0.81, 0.16).sub(tuftRoot).mul(grassScale));
+
 understoryMaterial.positionNode = windBend(0.61, 0.12);
 
 function branchTree(detail, seed) {

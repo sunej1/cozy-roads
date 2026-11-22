@@ -7,7 +7,9 @@ import {
   screenUV, smoothstep, texture, uniform, vec2, vec3,
 } from 'three/tsl';
 
-export const SUN = new THREE.Vector3(-0.84, 0.48, 0.23).normalize();
+import { SUN_DIRECTION } from './cloud-field.js';
+
+export const SUN = new THREE.Vector3(...SUN_DIRECTION).normalize();
 
 export function atmosphere(scene) {
   const far = uniform(7600);

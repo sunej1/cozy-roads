@@ -129,8 +129,12 @@ export function tileSurface(data, id, s, x, band = 0) {
   const row = Math.min(rows - 2, Math.floor(local));
   const v = local - row;
   const lateral = x - mix(data.position[row * columns * 3], data.position[(row + 1) * columns * 3], v) + offsets[0];
-  const next = offsets.findIndex(offset => offset > lateral);
-  const right = next < 0 ? columns - 1 : Math.max(1, next);
+  let lo = 1, right = columns - 1;
+  while (lo < right) {
+    const mid = (lo + right) >>> 1;
+    if (offsets[mid] <= lateral) lo = mid + 1;
+    else right = mid;
+  }
   const left = right - 1;
   const u = Math.max(0, Math.min(1, (lateral - offsets[left]) / (offsets[right] - offsets[left])));
   const y = (i, j) => data.position[(i * columns + j) * 3 + 1];

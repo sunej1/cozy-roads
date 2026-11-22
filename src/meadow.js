@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { grassMaterial, grassTuft } from './forest.js';
+import { grassMaterial, grassTuft, meadowCenter, meadowRange } from './forest.js';
 import { noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 
 const CELL = 16;
@@ -24,7 +24,7 @@ export class Meadow {
     const random = randomFor(this.world.seed ^ Math.imul(cx, 73856093) ^ Math.imul(cs, 19349663));
     let count = 0;
     for (let i = 0; i < grid * grid; i++) {
-      // Permute the lattice so a prefix of instances evenly covers distant cells.
+      // Keep each seed’s original tuft positions.
       const slot = (i * 47) % (grid * grid);
       const x = (cx + ((slot % grid) + random()) / grid) * CELL;
       const s = (cs + (Math.floor(slot / grid) + random()) / grid) * CELL;
@@ -54,32 +54,46 @@ export class Meadow {
     mesh.computeBoundingSphere();
     mesh.receiveShadow = true;
     this.scene.add(mesh);
-    return { mesh, count, cx, cs, low };
+    return { mesh, cx, cs, low };
   }
 
-  update(car, low) {
+  update(car, low, eager = false) {
     const cx = Math.floor(car.x / CELL),
-      cs = Math.floor(car.s / CELL),
-      radius = low ? 2 : 3;
-    if (this.cx === cx && this.cs === cs && this.low === low) return;
-    this.cx = cx;
-    this.cs = cs;
-    this.low = low;
-    for (const [key, cell] of this.cells) {
-      if (cell.low === low && Math.max(Math.abs(cell.cx - cx), Math.abs(cell.cs - cs)) <= radius) continue;
-      this.scene.remove(cell.mesh);
-      cell.mesh.dispose();
-      this.cells.delete(key);
-    }
-    for (let x = cx - radius; x <= cx + radius; x++)
-      for (let s = cs - radius; s <= cs + radius; s++) {
-        const key = x + ',' + s;
-        let cell = this.cells.get(key);
-        if (!cell) {
-          cell = this.plant(x, s, low);
-          this.cells.set(key, cell);
-        }
-        cell.mesh.count = Math.ceil(cell.count * (Math.max(Math.abs(x - cx), Math.abs(s - cs)) === radius ? 0.46 : 1));
+      cs = Math.floor(car.s / CELL);
+    const radius = low ? 4 : 5;
+    meadowCenter.value.set(car.x, -car.s);
+    meadowRange.value.set(low ? 14 : 24, low ? 35 : 55);
+    if (this.cx !== cx || this.cs !== cs || this.low !== low) {
+      this.cx = cx;
+      this.cs = cs;
+      this.low = low;
+      this.pending = [];
+      for (const [key, cell] of this.cells) {
+        if (cell.low === low && Math.hypot(cell.cx - cx, cell.cs - cs) <= radius + 0.6) continue;
+        this.scene.remove(cell.mesh);
+        cell.mesh.dispose();
+        this.cells.delete(key);
       }
+      for (let x = cx - radius; x <= cx + radius; x++) {
+        for (let s = cs - radius; s <= cs + radius; s++) {
+          const key = x + ',' + s;
+          const distance = Math.hypot(x - cx, s - cs);
+          if (distance <= radius + 0.6 && !this.cells.has(key)) this.pending.push({ key, x, s, distance });
+        }
+      }
+      this.pending.sort((a, b) => b.distance - a.distance);
+    }
+    // During a drive the new cells are still beyond the fade when they enter the queue.
+    const budget = eager ? this.pending.length : 2;
+    for (let i = 0; i < budget && this.pending.length; i++) {
+      const { key, x, s } = this.pending.pop();
+      this.cells.set(key, this.plant(x, s, low));
+    }
+    const reach = meadowRange.value.y;
+    for (const { mesh, cx: x, cs: s } of this.cells.values()) {
+      const dx = Math.max(x * CELL - car.x, car.x - (x + 1) * CELL, 0);
+      const ds = Math.max(s * CELL - car.s, car.s - (s + 1) * CELL, 0);
+      mesh.visible = dx * dx + ds * ds < reach * reach;
+    }
   }
 }

@@ -3,7 +3,7 @@ export const VEHICLES = {
     name: 'Wayfarer',
     description: 'Family wagon · Progressive throttle and a steady ride on gravel.',
     topSpeed: 28, pull: 5.3, turn: 1.52, roughGrip: 0.78, climb: 0.66, ford: 0.38,
-    radius: 0.345, width: 1.88, wheelbase: 2.58, suspension: 0.49,
+    radius: 0.298, width: 1.88, wheelbase: 2.58, suspension: 0.49,
   },
   retro: {
     name: 'Redline 92',
@@ -21,7 +21,7 @@ export const VEHICLES = {
     name: 'Ridgeline 4×4',
     description: 'Off-roader · Keeps its grip on steep trails and can ford shallower water.',
     topSpeed: 25, pull: 6.4, turn: 1.33, roughGrip: 1.02, climb: 0.94, ford: 0.78,
-    radius: 0.43, width: 1.86, wheelbase: 2.46, suspension: 0.72,
+    radius: 0.379, width: 1.86, wheelbase: 2.46, suspension: 0.72,
   },
 };
 

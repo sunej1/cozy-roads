@@ -41,7 +41,11 @@ The drive, speed, and starting point are shared across presets.
 
 ## Art credits
 
-Cozy Roads blends public-domain USGS elevation samples from Mount Shuksan into its procedural world. The vegetation, ground materials and vehicle meshes are original. [USGS 3D Elevation Program](https://www.usgs.gov/3d-elevation-program/about-3dep-products-services) Poly Haven supplies the [asphalt](https://polyhaven.com/a/worn_asphalt) and [mossy boulders](https://polyhaven.com/a/rock_moss_set_01) under [CC0](https://polyhaven.com/license).
+Cozy Roads blends public-domain USGS elevation samples from Mount Shuksan into its procedural world. The vegetation and procedural ground materials are original. [USGS 3D Elevation Program](https://www.usgs.gov/3d-elevation-program/about-3dep-products-services) Poly Haven supplies the [Kloppenheim reflection panorama](https://polyhaven.com/a/kloppenheim_06), [asphalt](https://polyhaven.com/a/worn_asphalt) and [mossy boulders](https://polyhaven.com/a/rock_moss_set_01) under [CC0](https://polyhaven.com/license).
+
+The Wayfarer, Redline 92 and Ridgeline use Comrade1280’s *Generic passenger car pack*. Cozy Roads converts the meshes to glTF, adjusts scale and paint, and rigs the wheels and brake lights. [Original models](https://sketchfab.com/3d-models/generic-passenger-car-pack-20f9af9b8a404d5cb022ac6fe87f21f5) · [Source distribution](https://github.com/TUM-VT/Sumonity-PassengerCars) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+
+The Vela uses the *Collect Cars* hypercar by drcollect. Cozy Roads simplifies the geometry, changes the finish and lights, and rigs the wheels. [Original model](https://github.com/drcollect/collect-cars) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
 ## Verify and build
 

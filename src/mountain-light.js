@@ -18,29 +18,48 @@ export function mountainLight(world, sun) {
   const border = uv.min(uv.oneMinus());
   const interior = border.x.min(border.y);
   const visibility = mix(1, smoothstep(-8, 24, positionWorld.y.sub(blocker)), smoothstep(0.025, 0.09, interior));
-  let lastX, lastS;
-  function update(car) {
-    const x = Math.floor(car.x / 1536) * 1536 - (SIZE * STEP) / 2;
-    const s = Math.floor(car.s / 1536) * 1536 - (SIZE * STEP) / 2;
-    if (x === lastX && s === lastS) return;
-    lastX = x;
-    lastS = s;
-    origin.value.set(x, s);
-    let previous = new Float32Array(SIZE).fill(-2000),
-      next = new Float32Array(SIZE);
-    const rows = Array.from({ length: SIZE }, (_, j) => world.section(s + (j + 0.5) * STEP));
+  let activeX, activeS, pending;
+  const back = new Uint16Array(SIZE * SIZE);
+  function update(car, eager = false) {
+    const x = Math.round(car.x / 1536) * 1536 - (SIZE * STEP) / 2;
+    const s = Math.round(car.s / 1536) * 1536 - (SIZE * STEP) / 2;
+    if (x === activeX && s === activeS) {
+      pending = null;
+      return;
+    }
+    if (!pending || pending.x !== x || pending.s !== s) {
+      pending = {
+        x,
+        s,
+        column: 0,
+        previous: new Float32Array(SIZE).fill(-2000),
+        next: new Float32Array(SIZE),
+        rows: Array.from({ length: SIZE }, (_, j) => world.section(s + (j + 0.5) * STEP)),
+      };
+    }
+    const { rows } = pending;
     const drift = sun.z / -sun.x,
       drop = (STEP * sun.y) / -sun.x;
-    for (let i = 0; i < SIZE; i++) {
+    const end = eager || activeX === undefined ? SIZE : Math.min(SIZE, pending.column + 4);
+    for (let i = pending.column; i < end; i++) {
+      const { previous, next } = pending;
       const wx = x + (i + 0.5) * STEP;
       for (let j = 0; j < SIZE; j++) {
         const height = world.sampleTerrain(rows[j], wx - rows[j].x);
         const upstream = previous[j] + (previous[Math.max(0, j - 1)] - previous[j]) * drift - drop;
-        data[j * SIZE + i] = THREE.DataUtils.toHalfFloat(upstream);
+        back[j * SIZE + i] = THREE.DataUtils.toHalfFloat(upstream);
         next[j] = Math.max(height, upstream);
       }
-      [previous, next] = [next, previous];
+      pending.previous = next;
+      pending.next = previous;
     }
+    pending.column = end;
+    if (end < SIZE) return;
+    data.set(back);
+    origin.value.set(x, s);
+    activeX = x;
+    activeS = s;
+    pending = null;
     map.needsUpdate = true;
   }
   return { visibility, update };

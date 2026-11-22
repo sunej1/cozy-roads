@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import './style.css';
 import { loadLandscapeAssets } from './assets.js';
-import { makeVehicle } from './car.js';
+import { loadVehicles } from './car.js';
 import { WorldView } from './world-view.js';
 import { createWorld, parseSeed } from './world.js';
 import { makeCinematic } from './cinematic.js';
@@ -28,6 +28,8 @@ const input = { throttle: false, brake: false, left: false, right: false };
 const recent = new RecentFrames();
 const resolutionBudget = new ResolutionBudget();
 const cameraTarget = new THREE.Vector3();
+const lastAnchor = new THREE.Vector2();
+const previousPose = {};
 const desiredCamera = new THREE.Vector3();
 const desiredTarget = new THREE.Vector3();
 const drawingBuffer = new THREE.Vector2();
@@ -35,7 +37,7 @@ const inputKeys = Object.keys(input);
 const STEP = 1 / 120;
 let car;
 let selectedVehicle = vehicleId(new URLSearchParams(location.search).get('car'));
-const models = new Map();
+let models;
 let mode = 'loading';
 let automatic = false;
 let low = false;
@@ -63,6 +65,7 @@ function isMoving() {
 function resetTime() {
   previousTime = null;
   accumulator = 0;
+  Object.assign(previousPose, car, { wheelTurn });
   recent.clear();
   nextUi = 0;
 }
@@ -134,7 +137,6 @@ function chooseVehicle(value, persist = true) {
   ui.vehicle.value = id;
   ui['vehicle-description'].textContent = VEHICLES[id].description;
   if (model) scene.remove(model.root);
-  if (!models.has(id)) models.set(id, makeVehicle(id));
   model = models.get(id);
   scene.add(model.root);
   if (persist) {
@@ -150,7 +152,11 @@ function chooseVehicle(value, persist = true) {
 }
 
 function poseScene(blend) {
-  const { x, s, heading } = car;
+  const alpha = blend === 1 || !isMoving() ? 1 : clamp(accumulator / STEP, 0, 1);
+  const x = mix(previousPose.x ?? car.x, car.x, alpha);
+  const s = mix(previousPose.s ?? car.s, car.s, alpha);
+  const angle = car.heading - (previousPose.heading ?? car.heading);
+  const heading = car.heading - Math.atan2(Math.sin(angle), Math.cos(angle)) * (1 - alpha);
   const vehicle = VEHICLES[selectedVehicle];
   const forwardX = Math.sin(heading);
   const forwardS = Math.cos(heading);
@@ -169,7 +175,7 @@ function poseScene(blend) {
   model.root.rotation.set(pitch, -heading, roll + bodyLean);
   for (const { pivot, wheel, front } of model.tires) {
     pivot.rotation.y = front ? -car.steering * 0.38 : 0;
-    wheel.rotation.x = -wheelTurn;
+    wheel.rotation.x = -mix(previousPose.wheelTurn ?? wheelTurn, wheelTurn, alpha);
   }
 
   if (mode === 'ready' || automatic) {
@@ -200,6 +206,14 @@ function poseScene(blend) {
     const framed = cameraY + (back + ahead) * Math.tan(roofAngle + .17);
     desiredTarget.set(targetX, Math.min(aim, framed), -targetS);
   }
+  // Carry the chase rig with the car so uneven frame intervals cannot pump its following distance.
+  if (blend < 1) {
+    camera.position.x += x - lastAnchor.x;
+    camera.position.z -= s - lastAnchor.y;
+    cameraTarget.x += x - lastAnchor.x;
+    cameraTarget.z -= s - lastAnchor.y;
+  }
+  lastAnchor.set(x, s);
   camera.position.lerp(desiredCamera, blend);
   if (mode !== 'ready' && !automatic) {
     camera.position.y = Math.max(camera.position.y, height(-camera.position.z, camera.position.x) + 1.2);
@@ -379,6 +393,8 @@ function advance(seconds) {
   accumulator += seconds;
   readInput();
   while (accumulator + 1e-9 >= STEP) {
+    Object.assign(previousPose, car);
+    previousPose.wheelTurn = wheelTurn;
     drive(car, STEP, input, automatic, world, height, VEHICLES[selectedVehicle]);
     wheelTurn += car.speed * STEP / VEHICLES[selectedVehicle].radius;
     accumulator -= STEP;
@@ -495,7 +511,8 @@ function bindControls() {
 async function initialize() {
   const forceWebGL = new URLSearchParams(location.search).get('renderer') === 'webgl';
   renderer = new THREE.WebGPURenderer({ canvas, antialias: true, forceWebGL });
-  const [, assets] = await Promise.all([renderer.init(), loadLandscapeAssets()]);
+  const [, assets, vehicles] = await Promise.all([renderer.init(), loadLandscapeAssets(), loadVehicles()]);
+  models = vehicles;
   world = createWorld(parseSeed(location.search), assets.elevations);
   car = newCarState(world);
   rendererName = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2';

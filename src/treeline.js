@@ -88,8 +88,7 @@ export class Treeline {
             world.sampleTerrain(row, lateral + 5) - y,
             world.terrainHeight(s + 5, x - world.centerX(s + 5)) - y,
           ) / 5;
-        const cover =
-          smooth(0.24, 0.67, grove) * (1 - smooth(0.65, 1.24, grade)) * (1 - smooth(limit - 120, limit, y));
+        const cover = smooth(0.24, 0.67, grove) * (1 - smooth(0.65, 1.24, grade)) * (1 - smooth(limit - 120, limit, y));
         if (rng() > cover * 0.91) continue;
         const scale = (0.73 + 1.18 * rng()) * (1 - 0.4 * smooth(260, 540, y));
         dummy.position.set(x, (close ? this.surface(s, x) : y) - 0.45, -s);
@@ -110,36 +109,46 @@ export class Treeline {
     return mesh;
   }
 
-  update(car, low) {
+  update(car, low, eager = false) {
     const cx = Math.floor(car.x / SIZE),
       cs = Math.floor(car.s / SIZE);
     const radius = low ? 4 : 8;
-    if (this.cx === cx && this.cs === cs && this.radius === radius) return;
-    this.cx = cx;
-    this.cs = cs;
-    this.radius = radius;
-    const keep = new Set();
-    for (let z = -radius; z <= radius; z++)
-      for (let x = -radius; x <= radius; x++) {
-        if (x * x + z * z > (radius + 0.5) ** 2) continue;
-        const i = cx + x,
-          j = cs + z,
-          key = i + ':' + j,
-          close = !low && Math.max(Math.abs(x), Math.abs(z)) <= 1;
-        keep.add(key);
-        const previous = this.cells.get(key);
-        if (previous && previous.close === close) continue;
-        if (previous) {
-          this.scene.remove(previous.mesh);
-          previous.mesh.dispose();
+    if (this.cx !== cx || this.cs !== cs || this.radius !== radius) {
+      this.cx = cx;
+      this.cs = cs;
+      this.radius = radius;
+      this.pending = [];
+      const keep = new Set();
+      for (let z = -radius; z <= radius; z++) {
+        for (let x = -radius; x <= radius; x++) {
+          const distance = x * x + z * z;
+          if (distance > (radius + 0.5) ** 2) continue;
+          const i = cx + x,
+            j = cs + z,
+            key = i + ':' + j;
+          const close = !low && Math.max(Math.abs(x), Math.abs(z)) <= 1;
+          keep.add(key);
+          if (this.cells.get(key)?.close !== close) this.pending.push({ i, j, key, close, distance });
         }
-        this.cells.set(key, { close, mesh: this.plant(i, j, close) });
       }
-    for (const [key, { mesh }] of this.cells)
-      if (!keep.has(key)) {
+      for (const [key, { mesh }] of this.cells) {
+        if (keep.has(key)) continue;
         this.scene.remove(mesh);
         mesh.dispose();
         this.cells.delete(key);
       }
+      this.pending.sort((a, b) => b.distance - a.distance);
+    }
+    const budget = eager ? this.pending.length : 1;
+    for (let i = 0; i < budget && this.pending.length; i++) {
+      const { key, i: x, j: s, close } = this.pending.pop();
+      const mesh = this.plant(x, s, close);
+      const previous = this.cells.get(key);
+      if (previous) {
+        this.scene.remove(previous.mesh);
+        previous.mesh.dispose();
+      }
+      this.cells.set(key, { close, mesh });
+    }
   }
 }

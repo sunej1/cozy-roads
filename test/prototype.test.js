@@ -181,3 +181,44 @@ test('mixed-detail mountain clusters share their actual drawn edges with each ot
   }
   assert.deepEqual(northEdge(west, 7, 1), northEdge(next, 0, 2));
 });
+
+test('distant shadow rebuilds stay bounded during a drive and restart after a reversal', async () => {
+  const { mountainLight } = await import('../src/mountain-light.js');
+  let samples = 0;
+  const world = {
+    section: () => ({ x: 0 }),
+    sampleTerrain: () => { samples++; return 100; },
+  };
+  const shadows = mountainLight(world, { x: -0.84, y: 0.48, z: 0.23 });
+  const start = { x: 0, s: 0 }, next = { x: 0, s: 1536 };
+  function count(position, eager = false) {
+    samples = 0;
+    shadows.update(position, eager);
+    return samples;
+  }
+  const full = count(start, true);
+  const batch = count(next);
+  assert.ok(batch > 0 && batch < full / 10);
+  assert.equal(count(start), 0);
+  let total = 0;
+  for (let i = 0; i < Math.ceil(full / batch); i++) total += count(next);
+  assert.equal(total, full);
+  assert.equal(count(next), 0);
+});
+
+test('every garage model ships with four wheel pivots on the correct axles and brake lights', () => {
+  for (const name of ['wagon', 'coupe', 'hyper', 'offroad']) {
+    const bytes = readFileSync(new URL('../assets/vehicles/' + name + '.glb', import.meta.url));
+    const json = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+    const roots = json.scenes[json.scene].nodes.map(index => json.nodes[index]);
+    for (const axle of ['f', 'r']) {
+      for (const side of ['l', 'r']) {
+        const wheel = roots.find(node => node.name === 'wheel_' + axle + side);
+        assert.ok(wheel?.children?.length, name);
+        const z = wheel.translation?.[2] ?? wheel.matrix[14];
+        assert.ok(z * (axle === 'f' ? -1 : 1) > 0, name);
+      }
+    }
+    assert.ok(json.materials.some(m => ['RearLamps', 'Light_Red'].includes(m.name) && m.emissiveFactor[0] > 0), name);
+  }
+});

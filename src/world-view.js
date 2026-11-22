@@ -352,7 +352,7 @@ export class WorldView {
     this.sun = new THREE.DirectionalLight('#ffe8c5', 3.28);
     this.sun.position.copy(SUN).multiplyScalar(125);
     this.sun.castShadow = true;
-    this.clouds = cloudLayer(this.sky, SUN);
+    this.clouds = cloudLayer(this.sky, SUN, assets.clouds);
     this.mountainLight = mountainLight(world, SUN);
     this.sun.shadow.shadowNode = shadow(this.sun).mul(this.mountainLight.visibility, this.clouds.shadow);
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -474,10 +474,10 @@ export class WorldView {
       }
     }
 
-    this.mountainLight.update(car);
+    this.mountainLight.update(car, eager);
     this.horizon.update(car, low, this.terrainRevision, eager);
-    this.treeline.update(car, low);
-    this.meadow.update(car, low);
+    this.treeline.update(car, low, eager);
+    this.meadow.update(car, low, eager);
     const currentBand = terrainBand(lateral);
     for (const { id, band, trees, aspens, rocks, nearStones, scanned, shrubs, treeCount } of this.chunks.values()) {
       const rowDistance = Math.abs(id - current);
