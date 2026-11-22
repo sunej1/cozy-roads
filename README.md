@@ -17,7 +17,7 @@ Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, a
 
 The default seed is `83472`. Choose **New world** from the start or pause screen to generate another seed. Share or reload the resulting URL to reproduce its road and scenery. You can also enter a seed directly, for example `?seed=275`. **Restart** returns to the beginning of the current seed.
 
-Landscape types blend along a continuous height field. Lakes occupy enclosed basins, and the road follows the same elevation as the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window.
+Landscape types blend along a continuous height field. Lakes occupy enclosed basins, and the road follows the same elevation as the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
 
 ## Vehicles
 
@@ -33,15 +33,15 @@ The measurements are elapsed time between browser animation callbacks. They incl
 
 | Preset | Rendering |
 | --- | --- |
-| Standard | Procedural meadow, shale and snow surfaces with carved gullies, wind-animated pines and aspens, grass patches that stream around the car, soft sun shadows, and planar lake reflections. |
-| Cinematic | Screen-space diffuse bounce and ambient occlusion, ray-marched sunbeams, and HDR bloom in addition to Standard. Begins rendering at full resolution, adjusts the 3D resolution under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
+| Standard | Surveyed mountain relief, slope-dependent snow, distant forest stands, volumetric clouds, terrain and cloud shadows, wind-animated grass and trees, and planar lake reflections. |
+| Cinematic | Screen-space diffuse bounce and ambient occlusion, ray-marched sunbeams, and HDR bloom in addition to Standard. Begins rendering at full resolution, can reduce each internal dimension to 90% under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
 | Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler terrain, water, and lighting. |
 
 The drive, speed, and starting point are shared across presets.
 
 ## Art credits
 
-Cozy Roads generates its terrain shapes and materials, vegetation, and vehicle meshes. Poly Haven supplies the [asphalt](https://polyhaven.com/a/worn_asphalt) and [mossy boulders](https://polyhaven.com/a/rock_moss_set_01) under [CC0](https://polyhaven.com/license).
+Cozy Roads blends public-domain USGS elevation samples from Mount Shuksan into its procedural world. The vegetation, ground materials and vehicle meshes are original. [USGS 3D Elevation Program](https://www.usgs.gov/3d-elevation-program/about-3dep-products-services) Poly Haven supplies the [asphalt](https://polyhaven.com/a/worn_asphalt) and [mossy boulders](https://polyhaven.com/a/rock_moss_set_01) under [CC0](https://polyhaven.com/license).
 
 ## Verify and build
 

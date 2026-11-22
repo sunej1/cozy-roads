@@ -1,3 +1,4 @@
+import { highlands } from './highlands.js';
 import { clamp, mix, noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 
 export const DEFAULT_SEED = 83472;
@@ -16,9 +17,10 @@ export function parseSeed(query) {
   return Number(value);
 }
 
-export function createWorld(seed = DEFAULT_SEED) {
+export function createWorld(seed = DEFAULT_SEED, elevations) {
   const key = (seed % 160001) * 0.031;
   const features = new Map();
+  const mountains = highlands(seed, elevations);
 
   function region(index) {
     let feature = features.get(index);
@@ -109,12 +111,23 @@ export function createWorld(seed = DEFAULT_SEED) {
     return closest;
   }
 
+  function mountainWeight(distance) {
+    return smooth(245, 1710, distance);
+  }
+
+  function reliefCoordinates(row, lateral, target, index) {
+    mountains.coordinates(row.x + lateral, row.s, target, index);
+    target[index + 3] = mountainWeight(Math.abs(lateral));
+  }
+
   function sampleTerrain(row, lateral) {
     const distance = Math.abs(lateral);
     if (distance <= ROAD_EDGE) return row.grade + 0.12 * (1 - (lateral / ROAD_EDGE) ** 2);
 
     const s = row.s;
     const x = row.x + lateral;
+    const outer = mountainWeight(distance);
+    if (outer === 1) return mountains.height(x, s);
     const rolling = noise(x / 112 + key, s / 168);
     const hummock = noise(x / 37 + key + 25, s / 51) - 0.5;
     const surface = noise(x / 8.5 + key + 4, s / 13) - 0.5;
@@ -131,7 +144,8 @@ export function createWorld(seed = DEFAULT_SEED) {
     const tributary = (1 - Math.abs(Math.sin(channel * 2.7 + rolling * 5))) ** 5;
     const erosion = range * (row.ridge * .19 + row.hills * .22) * (ravine + .39 * tributary);
     const gravel = smooth(7.5, 30, distance);
-    const base = row.grade + slope + massif - erosion + gravel * (hummock * 14 + surface * 2.8) + range * cracks * 46;
+    const inner = row.grade + slope + massif * .60 - erosion * .74 + gravel * (hummock * 14 + surface * 2.8) + range * cracks * 32;
+    const base = outer > 0 ? mix(inner, mountains.height(x, s), outer) : inner;
     const shore = shoreDistance(row, lateral);
     if (shore >= 0) return -25 * smooth(0, 92, shore) - 0.5 * smooth(0, 4, shore);
     // The shoulder stays attached to the road even when an irregular bank approaches it.
@@ -154,7 +168,7 @@ export function createWorld(seed = DEFAULT_SEED) {
   }
 
   return {
-    seed, centerX, roadHeight, section, sampleTerrain, shoreDistance, terrainHeight, routePose,
+    seed, centerX, roadHeight, section, sampleTerrain, reliefCoordinates, shoreDistance, terrainHeight, routePose,
     biomeAt: s => region(Math.floor(s / REGION_LENGTH + 0.5)),
   };
 }

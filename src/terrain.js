@@ -1,18 +1,10 @@
-import { CHUNK_LENGTH, mix, noise, ROAD_EDGE, smooth } from './route.js';
+import { CHUNK_LENGTH, mix, ROAD_EDGE } from './route.js';
 
 export const TERRAIN_STEP = 4;
 
-const negativeColumns = [
-  -960, -780, -668, -570, -500, -448, -405, -375, -346, -321, -297, -272,
-  -250, -228, -208, -190, -171, -153, -136, -119, -103, -89, -77, -65, -55,
-  -47, -40, -33, -27, -22, -17, -13, -10, -8, -6.4, -ROAD_EDGE,
-];
-const refined = negativeColumns.flatMap((x, i) => {
-  const next = negativeColumns[i + 1] ?? 0;
-  const count = Math.ceil((next - x) / 24);
-  return Array.from({length: count}, (_, j) => mix(x, next, j / count));
-});
-export const TERRAIN_COLUMNS = [...refined, 0, ...refined.slice().reverse().map(n => -n)];
+const verge = [-47, -40, -33, -27, -22, -17, -13, -10, -8, -6.4, -ROAD_EDGE];
+const ridgeColumns = Array.from({ length: 193 }, (_, i) => (i - 96) * 10);
+export const TERRAIN_COLUMNS = [...new Set([...ridgeColumns, ...verge, ...verge.map(x => -x)])].sort((a, b) => a - b);
 const BAND_WIDTH = 768;
 const MAIN_EDGE = TERRAIN_COLUMNS.at(-1);
 
@@ -27,10 +19,10 @@ export function bandBounds(band) {
   return band > 0 ? [start, start + BAND_WIDTH] : [-start - BAND_WIDTH, -start];
 }
 
-const extraOffsets = Array.from({ length: BAND_WIDTH / 16 + 1 }, (_, index) => index * 16);
+const extraOffsets = Array.from({ length: BAND_WIDTH / 12 + 1 }, (_, index) => index * 12);
 const offsetCache = new Map();
 
-function bandColumns(band) {
+export function bandColumns(band) {
   if (band === 0) return TERRAIN_COLUMNS;
   if (!offsetCache.has(band)) {
     const [start] = bandBounds(band);
@@ -40,20 +32,6 @@ function bandColumns(band) {
   return offsetCache.get(band);
 }
 const rows = CHUNK_LENGTH / TERRAIN_STEP + 1;
-
-function linearColor(hex) {
-  return [16, 8, 0].map(shift => {
-    const n = ((hex >> shift) & 255) / 255;
-    return n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4;
-  });
-}
-
-const pine = linearColor(0x345136);
-const grass = linearColor(0x748150);
-const gravel = linearColor(0x998a71);
-const rock = linearColor(0x7a797a);
-const snow = linearColor(0xf4f3ea);
-const lakebed = linearColor(0x586656);
 
 function waterMesh(world, scanlines) {
   const positions = [];
@@ -101,7 +79,7 @@ export function buildTerrain(world, id, band = 0) {
   const heights = scanlines.map(row => offsets.map(x => world.sampleTerrain(row, x)));
   const position = new Float32Array(rows * columns * 3);
   const normal = new Float32Array(position.length);
-  const color = new Float32Array(position.length);
+  const relief = new Float32Array(rows * columns * 4);
   const index = new Uint16Array((rows - 1) * (columns - 1) * 6);
   let face = 0;
 
@@ -114,6 +92,7 @@ export function buildTerrain(world, id, band = 0) {
       const k = vertex * 3;
       const lateral = offsets[j];
       const y = yValues[j];
+      world.reliefCoordinates(row, lateral, relief, vertex * 4);
       position[k] = row.x + lateral;
       position[k + 1] = y;
       position[k + 2] = -row.s;
@@ -131,20 +110,6 @@ export function buildTerrain(world, id, band = 0) {
       normal[k] = nx / length;
       normal[k + 1] = ny / length;
       normal[k + 2] = nz / length;
-      const mottling = noise(position[k] / 25 + world.seed % 7001, row.s / 45);
-      const clearing = mix(0.42, 0.94, mottling) * (1.42 - row.trees * 0.60);
-      const exposed = Math.max(smooth(77, 176, y), 1 - smooth(0.37, 0.79, ny / length));
-      const snowline = smooth(198, 315, y + (mottling - 0.5) * 80) * smooth(0.37, 0.82, ny / length);
-      const nearRoad = 1 - smooth(5.0, 11, Math.abs(lateral));
-      const nearWater = 1 - smooth(0, 5.5, y);
-      for (let channel = 0; channel < 3; channel++) {
-        const land = mix(mix(pine[channel], grass[channel], Math.min(1, clearing)), rock[channel], exposed * 0.88);
-        const upper = mix(land, snow[channel], snowline);
-        const bank = mix(lakebed[channel], gravel[channel], smooth(-1, 0.7, y));
-        color[k + channel] = mix(mix(upper, bank, nearWater * 0.70), gravel[channel], nearRoad * 0.85)
-          * (0.78 + mottling * 0.35);
-      }
-
       if (i > 0 && j > 0) {
         const a = vertex - columns - 1;
         const b = a + 1;
@@ -154,7 +119,7 @@ export function buildTerrain(world, id, band = 0) {
       }
     }
   }
-  return { position, normal, color, index, water: band === 0 ? waterMesh(world, scanlines) : null };
+  return { position, normal, relief, index, water: band === 0 ? waterMesh(world, scanlines) : null };
 }
 
 export function tileSurface(data, id, s, x, band = 0) {

@@ -11,7 +11,7 @@ import { RecentFrames, ResolutionBudget, summarize } from './timing.js';
 
 const element = id => document.getElementById(id);
 const canvas = element('view');
-const world = createWorld(parseSeed(location.search));
+let world;
 const ui = Object.fromEntries([
   'intro', 'intro-title', 'intro-description', 'start', 'auto', 'restart', 'new-world', 'pause', 'vehicle', 'vehicle-description',
   'performance-toggle', 'performance', 'quality', 'resolution', 'fps', 'median', 'p95',
@@ -33,7 +33,7 @@ const desiredTarget = new THREE.Vector3();
 const drawingBuffer = new THREE.Vector2();
 const inputKeys = Object.keys(input);
 const STEP = 1 / 120;
-let car = newCarState(world);
+let car;
 let selectedVehicle = vehicleId(new URLSearchParams(location.search).get('car'));
 const models = new Map();
 let mode = 'loading';
@@ -184,13 +184,21 @@ function poseScene(blend) {
     const shoulder = 0.74;
     const cameraX = x - forwardX * back + forwardS * shoulder;
     const cameraS = s - forwardS * back - forwardX * shoulder;
-    const cameraY = Math.max(y + 2.97, height(cameraS, cameraX) + 1.7);
+    let cameraY = Math.max(y + 2.97, height(cameraS, cameraX) + 1.7);
+    const roof = model.root.position.y + 1.35;
+    for (const t of [.25, .5, .75]) {
+      const ground = height(mix(s, cameraS, t), mix(x, cameraX, t));
+      cameraY = Math.max(cameraY, roof + (ground + .55 - roof) / t);
+    }
     const ahead = 15;
     const targetX = x + forwardX * ahead;
     const targetS = s + forwardS * ahead;
     const groundAhead = height(targetS, targetX);
     desiredCamera.set(cameraX, cameraY, -cameraS);
-    desiredTarget.set(targetX, y + 1.8 + clamp(groundAhead - y, -3, 5) * 0.38, -targetS);
+    const aim = y + 1.8 + clamp(groundAhead - y, -3, 5) * .38;
+    const roofAngle = Math.atan2(roof - cameraY, back);
+    const framed = cameraY + (back + ahead) * Math.tan(roofAngle + .17);
+    desiredTarget.set(targetX, Math.min(aim, framed), -targetS);
   }
   camera.position.lerp(desiredCamera, blend);
   if (mode !== 'ready' && !automatic) {
@@ -225,6 +233,7 @@ function resize() {
   renderer.setPixelRatio(pixelRatio);
   renderer.setSize(width, height, false);
   renderer.getDrawingBufferSize(drawingBuffer);
+  landscape.horizon.focal = drawingBuffer.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
   showResolution();
   needsRender = true;
 }
@@ -487,6 +496,8 @@ async function initialize() {
   const forceWebGL = new URLSearchParams(location.search).get('renderer') === 'webgl';
   renderer = new THREE.WebGPURenderer({ canvas, antialias: true, forceWebGL });
   const [, assets] = await Promise.all([renderer.init(), loadLandscapeAssets()]);
+  world = createWorld(parseSeed(location.search), assets.elevations);
+  car = newCarState(world);
   rendererName = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2';
   const cinematicOption = ui.quality.querySelector('[value=cinematic]');
   cinematicOption.hidden = cinematicOption.disabled = rendererName !== 'WebGPU';
@@ -495,7 +506,7 @@ async function initialize() {
   renderer.toneMappingExposure = 0.96;
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#aec5c6');
-  camera = new THREE.PerspectiveCamera(59, 1, 0.22, 1740);
+  camera = new THREE.PerspectiveCamera(59, 1, 0.25, 9800);
   landscape = new WorldView(scene, assets, world);
   ui.seed.textContent = 'World seed ' + world.seed;
   chooseVehicle(selectedVehicle, false);

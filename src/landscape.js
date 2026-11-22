@@ -1,15 +1,16 @@
 import * as THREE from 'three/webgpu';
+import { RELIEF_SIZE } from './highlands.js';
 import { randomFor } from './route.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import {
   attribute, cameraPosition, color, dot, float, fog, mix, normalViewGeometry, normalWorldGeometry, positionView, positionWorld, reflector,
-  screenUV, smoothstep, texture, uniform, vec2, vec3, vertexColor,
+  screenUV, smoothstep, texture, uniform, vec2, vec3,
 } from 'three/tsl';
 
 export const SUN = new THREE.Vector3(-0.84, 0.48, 0.23).normalize();
 
 export function atmosphere(scene) {
-  const far = uniform(1400);
+  const far = uniform(7600);
   const ray = positionWorld.sub(cameraPosition);
   const distance = ray.length();
   const first = cameraPosition.y.max(0);
@@ -18,11 +19,11 @@ export function atmosphere(scene) {
   const heightDelta = first.sub(last).abs().mul(0.022);
   const lowAir = lower.mul(-0.022).exp()
     .mul(heightDelta.lessThan(0.001).select(1, heightDelta.negate().exp().oneMinus().div(heightDelta.max(0.001))));
-  const extinction = distance.mul(float(0.00023).add(lowAir.mul(0.00084)));
+  const extinction = distance.mul(float(0.000105).add(lowAir.mul(0.00042)));
   const aerial = extinction.negate().exp().oneMinus();
-  const cover = smoothstep(far.mul(0.57), far, distance).mul(0.94);
+  const cover = smoothstep(far.mul(0.78), far, distance);
   const glow = dot(ray.normalize(), vec3(SUN.x, SUN.y, SUN.z)).max(0).pow(7);
-  const highAir = mix(color('#a9c1cb'), color('#829cb6'), smoothstep(-0.08, 0.29, ray.normalize().y));
+  const highAir = mix(color('#6687ac'), color('#b6cbd6'), smoothstep(800, 7400, distance));
   const haze = mix(highAir, color('#f1d6ad'), glow.mul(0.74));
   scene.fogNode = fog(haze, aerial.max(cover));
   return far;
@@ -43,7 +44,7 @@ export function makeSky() {
   sky.cloudSpeed.value = 0.000012;
   sky.material.fog = false;
   sky.frustumCulled = false;
-  sky.renderOrder = -100;
+  sky.renderOrder = 100;
   return sky;
 }
 
@@ -157,26 +158,129 @@ function groundNoise() {
 }
 
 const mineralNoise=groundNoise();
-export function makeTerrainMaterial(low=false) {
-  const material=new THREE.MeshStandardNodeMaterial();
-  const p=positionWorld, nWorld=normalWorldGeometry.normalize();
-  const projection=vec2(p.x.add(p.z.mul(.31)),p.z.sub(p.x.mul(.24)).add(p.y.mul(.74)));
-  const field=texture(mineralNoise,projection.mul(.0062)).toVar();
-  const grain=texture(mineralNoise,vec2(p.z.add(p.y.mul(.71)),p.x.sub(p.y.mul(.34))).mul(.155)).toVar();
-  const meadow=mix(color('#476638'),color('#aba665'),field.r.mul(.52).add(field.g.mul(.36),field.b.mul(.12)));
-  const mineral=field.b.mul(.47).add(field.g.mul(.30),grain.g.mul(.23));
-  const bedding=p.y.mul(.40).add(p.x.mul(.073),p.z.mul(.095),field.g.mul(6)).sin().mul(.09).add(.95);
-  const stone=mix(color('#4a5355'),color('#acaaa0'),mineral).mul(bedding);
-  const exposed=smoothstep(.38,.82,nWorld.y).oneMinus().max(smoothstep(97,190,p.y.add(field.r.mul(40))));
-  const snow=smoothstep(186,239,p.y.add(field.r.mul(52),field.b.mul(27))).mul(smoothstep(.34,.84,nWorld.y));
-  const coarse=mix(mix(meadow,stone,exposed),mix(color('#a9bac7'),color('#f1f4ef'),field.b),snow);
-  const grit=grain.a.mul(.26).add(grain.b.mul(.23),.76);
-  material.colorNode=mix(vertexColor().rgb,coarse,.74).mul(grit);
-  material.roughnessNode=mix(.94,.74,snow);
-  if(low) return material;
-  const zoom=p.sub(cameraPosition).length();
-  const relief=grain.b.mul(.050).add(grain.a.mul(.017),grain.g.mul(exposed).mul(.16),field.b.mul(exposed).mul(.63))
-    .mul(smoothstep(40,260,zoom).oneMinus()).toVar();
+export function makeReliefTexture(elevations) {
+  // Encode slopes directly. Differentiating a filtered kilometre-high elevation
+  // in a fragment shader can turn half-float rounding into visible contour lines.
+  const size = RELIEF_SIZE;
+  const smooth = new Float32Array(elevations.length);
+  const residual = new Float32Array(elevations.length);
+  const index = (x, y) => Math.max(0, Math.min(size - 1, y)) * size + Math.max(0, Math.min(size - 1, x));
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      let sum = 0;
+      for (let k = -6; k <= 6; k++) sum += elevations[index(x + k, y)] * (7 - Math.abs(k));
+      smooth[y * size + x] = sum / (4 * 49);
+    }
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      let sum = 0;
+      for (let k = -6; k <= 6; k++) sum += smooth[index(x, y + k)] * (7 - Math.abs(k));
+      residual[y * size + x] = elevations[y * size + x] * 0.25 - sum / 49;
+    }
+  const data = new Uint8Array(elevations.length * 4);
+  const encode = (value, range) => Math.round(255 * THREE.MathUtils.clamp(0.5 + value / (2 * range), 0, 1));
+  for (let y = 0; y < size; y++)
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      data[i] = encode((residual[index(x + 1, y)] - residual[index(x - 1, y)]) * 0.5, 40);
+      data[i + 1] = encode((residual[index(x, y + 1)] - residual[index(x, y - 1)]) * 0.5, 40);
+      data[i + 2] = encode(residual[index(x, y)], 90);
+      data[i + 3] = 255;
+    }
+  const map = new THREE.DataTexture(data, size, size);
+  map.generateMipmaps = true;
+  map.minFilter = THREE.LinearMipmapLinearFilter;
+  map.magFilter = THREE.LinearFilter;
+  map.needsUpdate = true;
+  return map;
+}
+
+function surveyDetail(map) {
+  const basis = attribute('reliefField', 'vec4');
+  const uv = basis.xy;
+  const rotated = vec2(uv.y.mul(0.71).sub(uv.x.mul(0.53)).add(279), uv.y.mul(0.53).add(uv.x.mul(0.71)).sub(374));
+  function residual(point) {
+    const half = RELIEF_SIZE - 1;
+    const mirrored = point
+      .div(2 * half)
+      .fract()
+      .mul(2)
+      .sub(1)
+      .abs()
+      .oneMinus()
+      .mul(half)
+      .toVar();
+    const sample = texture(map, mirrored.add(0.5).div(RELIEF_SIZE)).rgb.sub(0.5);
+    const slope = sample.rg.mul(80);
+    return vec3(dot(slope, mirrored.dFdx()), dot(slope, mirrored.dFdy()), sample.b.mul(180));
+  }
+  return mix(residual(uv), residual(rotated), basis.z).mul(basis.w, 0.67).toVar();
+}
+
+export function makeTerrainMaterial(reliefMap, low = false) {
+  const material = new THREE.MeshStandardNodeMaterial();
+  const p = positionWorld,
+    nWorld = normalWorldGeometry.normalize();
+  const axes = nWorld.abs().pow(4);
+  const weights = axes.div(axes.x.add(axes.y, axes.z)).toVar();
+  function triplanar(scale) {
+    return texture(mineralNoise, p.zy.mul(scale))
+      .mul(weights.x)
+      .add(
+        texture(mineralNoise, p.xz.mul(scale)).mul(weights.y),
+        texture(mineralNoise, p.xy.mul(scale)).mul(weights.z),
+      )
+      .toVar();
+  }
+  const field = triplanar(0.0062),
+    grain = triplanar(0.148);
+  const zoom = p.sub(cameraPosition).length();
+  const macro = texture(mineralNoise, vec2(p.x.add(p.z.mul(0.34)), p.z.sub(p.x.mul(0.26))).mul(0.00074)).toVar();
+  const meadow = mix(
+    color('#455e36'),
+    color('#a0a068'),
+    field.r.mul(0.52).add(field.g.mul(0.36), field.b.mul(0.12)),
+  );
+  const residual = surveyDetail(reliefMap);
+  const aspect = dot(nWorld, vec3(0.74, 0, -0.42));
+  // Two intersecting joint sets break up folded beds into separate rock faces.
+  const warp = field.g.sub(0.5).mul(3.3).add(macro.r.mul(10));
+  const bed = p.y.mul(0.25).add(p.x.mul(0.048), p.z.mul(0.083), warp).sin().abs();
+  const joint = p.x
+    .mul(0.18)
+    .sub(p.y.mul(0.075))
+    .add(p.z.mul(0.12), field.r.mul(4.4), grain.g.mul(0.5))
+    .sin()
+    .abs();
+  const fissure = smoothstep(0.03, 0.18, bed.min(joint)).oneMinus();
+  const strata = mix(
+    color('#575c60'),
+    color('#9e988b'),
+    field.r.mul(0.48).add(field.b.mul(0.25), macro.g.mul(0.27)),
+  );
+  const stone = strata.mul(fissure.mul(-0.18).add(1), grain.g.mul(0.14).add(0.94));
+  const high = p.y.add(macro.r.sub(0.5).mul(110));
+  const exposed = smoothstep(0.45, 0.83, nWorld.y)
+    .oneMinus()
+    .max(smoothstep(170, 420, high));
+  const shelter = residual.z.negate().clamp(-40, 40).mul(4.8).add(aspect.mul(80), field.r.sub(0.5).mul(115));
+  const snowline = smoothstep(325, 750, high.add(shelter));
+  const adhesion = smoothstep(0.38, 0.84, nWorld.y.add(aspect.mul(0.12), field.g.sub(0.5).mul(0.2)));
+  const snow = smoothstep(0.27, 0.74, snowline.mul(adhesion));
+  const forest = smoothstep(0.28, 0.66, macro.g.mul(0.68).add(field.r.mul(0.32))).mul(
+    smoothstep(180, 440, high).oneMinus(),
+    smoothstep(0.53, 0.8, nWorld.y),
+    smoothstep(90, 540, zoom),
+  );
+  const canopy = mix(color('#273e38'), color('#566449'), field.b.mul(0.6).add(grain.g.mul(0.4)));
+  const drifts = mix(color('#b1c3cf'), color('#faf8ef'), field.g.mul(0.38).add(0.46));
+  const coarse = mix(mix(mix(meadow, canopy, forest), stone, exposed), drifts, snow);
+  material.colorNode = coarse.mul(grain.a.mul(0.14).add(grain.b.mul(0.12), 0.87));
+  material.roughnessNode = mix(0.94, 0.66, snow);
+  if (low) return material;
+  const near = smoothstep(60, 390, zoom).oneMinus();
+  const crag = field.g.mul(0.62).add(field.b.mul(0.4), fissure.mul(-0.33), grain.g.mul(near).mul(0.09));
+  const relief = crag.mul(exposed, snow.mul(-0.72).add(1)).add(grain.b.mul(near).mul(0.038)).toVar();
   const n = normalViewGeometry.normalize();
   const dx = positionView.dFdx();
   const dy = positionView.dFdy();
@@ -184,7 +288,10 @@ export function makeTerrainMaterial(low=false) {
   const along = n.cross(dx);
   const determinant = dot(dx, across);
   // Surface-gradient bump mapping keeps the relief oriented across all three projections.
-  const gradient = across.mul(relief.dFdx()).add(along.mul(relief.dFdy())).mul(determinant.sign());
+  const gradient = across
+    .mul(relief.dFdx().add(residual.x.mul(0.73)))
+    .add(along.mul(relief.dFdy().add(residual.y.mul(0.73))))
+    .mul(determinant.sign());
   material.normalNode = n.mul(determinant.abs().max(0.0000001)).sub(gradient).normalize();
   return material;
 }

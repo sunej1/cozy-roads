@@ -1,18 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { CHUNK_LENGTH, drive, newCarState, ROAD_EDGE, surfaceAt, TOUR_SPEED } from '../src/route.js';
 import { bandBounds, buildTerrain, terrainBand, TERRAIN_COLUMNS } from '../src/terrain.js';
-import { createWorld, DEFAULT_SEED, parseSeed, REGION_LENGTH } from '../src/world.js';
+import { createWorld as seededWorld, DEFAULT_SEED, parseSeed, REGION_LENGTH } from '../src/world.js';
+import { mountainPage } from '../src/horizon.js';
 import { VEHICLES, vehicleId } from '../src/vehicles.js';
 import { RecentFrames, ResolutionBudget, summarize } from '../src/timing.js';
+
+const raster = readFileSync(new URL('../assets/shuksan.u16', import.meta.url));
+const elevations = new Uint16Array(raster.buffer, raster.byteOffset, raster.byteLength / 2);
+const createWorld = seed => seededWorld(seed, elevations);
 
 test('adaptive resolution ignores an isolated long frame and responds to sustained pressure', () => {
   const budget = new ResolutionBudget();
   assert.equal(budget.observe(80), false);
-  for (let frame = 0; frame < 4; frame++) budget.observe(16.7);
+  for (let frame = 0; frame < 120; frame++) budget.observe(33.4);
   assert.equal(budget.scale, 1);
-  assert.equal(budget.observe(33.4), false);
-  assert.equal(budget.observe(33.4), true);
+  assert.equal(budget.observe(45), false);
+  assert.equal(budget.observe(45), true);
   assert.equal(budget.scale, 0.94);
   for (let frame = 0; frame < 551; frame++) budget.observe(16.7);
   assert.equal(budget.scale, 0.94);
@@ -64,7 +70,8 @@ test('terrain tiles match across boundaries regardless of build order', () => {
     const stride = TERRAIN_COLUMNS.length * 3;
     assert.deepEqual(tile.position.slice(-stride), next.position.slice(0, stride));
     assert.deepEqual(tile.normal.slice(-stride), next.normal.slice(0, stride));
-    assert.deepEqual(tile.color.slice(-stride), next.color.slice(0, stride));
+    const uvStride = TERRAIN_COLUMNS.length * 4;
+    assert.deepEqual(tile.relief.slice(-uvStride), next.relief.slice(0, uvStride));
     assert.deepEqual(tile, buildTerrain(createWorld(), index));
   }
   const lake = buildTerrain(world, 0).water;
@@ -83,13 +90,14 @@ test('terrain bands stitch across the lateral grid and stream away from the road
     const outerRows = CHUNK_LENGTH / 4 + 1;
     const west = buildTerrain(world, 2, left);
     const east = buildTerrain(world, 2, right);
-    const westStride = west.position.length / outerRows;
-    const eastStride = east.position.length / outerRows;
-    for (const attribute of ['position', 'color', 'normal']) {
+    for (const attribute of ['position', 'relief', 'normal']) {
+      const width = attribute === 'relief' ? 4 : 3;
+      const westStride = west[attribute].length / outerRows;
+      const eastStride = east[attribute].length / outerRows;
       for (let row = 0; row < outerRows; row++) {
         const last = (row + 1) * westStride;
         const first = row * eastStride;
-        assert.deepEqual(west[attribute].slice(last - 3, last), east[attribute].slice(first, first + 3));
+        assert.deepEqual(west[attribute].slice(last - width, last), east[attribute].slice(first, first + width));
       }
     }
   }
@@ -136,4 +144,40 @@ test('rolling samples preserve order and benchmark math includes slow frames', (
   assert.equal(stats.maxMs, 40);
   recent.clear();
   assert.equal(summarize(recent.values()), null);
+});
+
+test('mixed-detail mountain clusters share their actual drawn edges with each other and driving tiles', () => {
+  const world = createWorld(275);
+  const west = mountainPage(world, 1, -1, 64);
+  const east = mountainPage(world, 2, -1, 32);
+  const strip = 5;
+  function seam(page, level) {
+    const result = [];
+    for (const id of new Set(page.lod[strip][level])) {
+      const p = Array.from(page.position.slice(id * 3, id * 3 + 3));
+      if (Math.abs(p[0] - world.centerX(-p[2]) - 960) < 0.001) result.push(p);
+    }
+    return result.sort((a, b) => b[2] - a[2]);
+  }
+  const boundary = seam(west, 0);
+  assert.equal(boundary.length, CHUNK_LENGTH / 4 + 1);
+  const driving = buildTerrain(world, -8 + strip, 1);
+  for (let i = 0; i < boundary.length; i++) {
+    const k = (i * driving.position.length) / boundary.length;
+    assert.deepEqual(Array.from(driving.position.slice(k, k + 3)), boundary[i]);
+  }
+  for (const level of [0, 1, 2]) {
+    assert.deepEqual(seam(west, level), boundary);
+    assert.deepEqual(seam(east, level), boundary);
+  }
+  assert.ok(east.lod[strip][2].length < east.lod[strip][0].length);
+  assert.ok(west.errors[strip][2] > 0);
+  const next = mountainPage(world, 1, 0, 32);
+  function northEdge(page, strip, level) {
+    const points = [...new Set(page.lod[strip][level])].map((id) =>
+      Array.from(page.position.slice(3 * id, 3 * id + 3)),
+    );
+    return points.filter((p) => p[2] === 0).sort((a, b) => a[0] - b[0]);
+  }
+  assert.deepEqual(northEdge(west, 7, 1), northEdge(next, 0, 2));
 });

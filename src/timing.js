@@ -47,7 +47,7 @@ export class RecentFrames {
   }
 }
 
-const RENDER_SCALES = [1, 0.94, 0.88, 0.82, 0.76, 0.70, 0.64, 0.58];
+const RENDER_SCALES = [1, 0.94, 0.90];
 
 export class ResolutionBudget {
   constructor() {
@@ -71,7 +71,7 @@ export class ResolutionBudget {
       this.cooldown--;
       return false;
     }
-    this.pressure = Math.max(0, this.pressure + (ms > 25 ? 3 : -1));
+    this.pressure = Math.max(0, this.pressure + (ms > 36 ? 3 : -1));
     this.fast = ms < 20 ? this.fast + 1 : 0;
     let next = this.level;
     if (this.pressure >= 6) next = Math.min(this.level + 1, RENDER_SCALES.length - 1);
