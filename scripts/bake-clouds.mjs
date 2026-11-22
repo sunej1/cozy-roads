@@ -1,4 +1,5 @@
 import { writeFileSync } from 'node:fs';
+import { gzipSync } from 'node:zlib';
 import { randomFor, smooth } from '../src/route.js';
 
 import {
@@ -97,4 +98,18 @@ for (let z = 0; z < width; z++)
       data[offset] = Math.round(Math.min(1, density(px, h, pz) / 2) * 255);
       data[offset + 1] = Math.round((0.28 + 0.72 * Math.exp(-2.7 * (0.95 * ahead(135) + 0.68 * ahead(370)))) * 255);
     }
-writeFileSync(new URL('../assets/cloud-field.u8', import.meta.url), data);
+// Integrate sunlight once per ground column. Receivers then project onto this
+// plane with parallax at their own elevation, including the reflective lake.
+const shade = new Uint8Array(width * width);
+for (let z = 0; z < width; z++) {
+  for (let x = 0; x < width; x++) {
+    let optical = 0;
+    for (let k = 0; k < 16; k++) {
+      const h = bottom + ((k + 0.5) / 16) * (top - bottom);
+      const d = (h - bottom) / sunY;
+      optical += density((x + 0.5) / width + d * sunX * CLOUD_SCALE_X, h, (z + 0.5) / width + d * sunZ * CLOUD_SCALE_Z);
+    }
+    shade[z * width + x] = Math.round(255 * (0.20 + 0.80 * Math.exp(-optical * 0.165)));
+  }
+}
+writeFileSync(new URL('../assets/cloud-field.bin', import.meta.url), gzipSync(Buffer.concat([data, shade]), { level: 9 }));

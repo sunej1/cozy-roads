@@ -81,6 +81,7 @@ export function buildTerrain(world, id, band = 0) {
   const normal = new Float32Array(position.length);
   const relief = new Float32Array(rows * columns * 4);
   const index = new Uint16Array((rows - 1) * (columns - 1) * 6);
+  const roadOffset = new Float32Array(rows * columns);
   let face = 0;
 
   for (let i = 0; i < rows; i++) {
@@ -91,6 +92,7 @@ export function buildTerrain(world, id, band = 0) {
       const vertex = i * columns + j;
       const k = vertex * 3;
       const lateral = offsets[j];
+      roadOffset[vertex] = lateral;
       const y = yValues[j];
       world.reliefCoordinates(row, lateral, relief, vertex * 4);
       position[k] = row.x + lateral;
@@ -119,7 +121,7 @@ export function buildTerrain(world, id, band = 0) {
       }
     }
   }
-  return { position, normal, relief, index, water: band === 0 ? waterMesh(world, scanlines) : null };
+  return { position, normal, relief, roadOffset, index, water: band === 0 ? waterMesh(world, scanlines) : null };
 }
 
 export function tileSurface(data, id, s, x, band = 0) {

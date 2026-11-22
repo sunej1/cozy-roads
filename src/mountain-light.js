@@ -46,7 +46,8 @@ export function mountainLight(world, sun) {
       const wx = x + (i + 0.5) * STEP;
       for (let j = 0; j < SIZE; j++) {
         const height = world.sampleTerrain(rows[j], wx - rows[j].x);
-        const upstream = previous[j] + (previous[Math.max(0, j - 1)] - previous[j]) * drift - drop;
+        const source = Math.max(0, Math.min(SIZE - 1, j - Math.sign(drift)));
+        const upstream = previous[j] + (previous[source] - previous[j]) * Math.abs(drift) - drop;
         back[j * SIZE + i] = THREE.DataUtils.toHalfFloat(upstream);
         next[j] = Math.max(height, upstream);
       }

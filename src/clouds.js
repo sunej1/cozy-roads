@@ -10,7 +10,7 @@ import {
   mix,
   positionWorld,
   smoothstep,
-  texture3D,
+  texture, texture3D, vec2,
   uniform,
   vec3,
   vec4,
@@ -18,7 +18,8 @@ import {
 import { CLOUD_WIDTH, CLOUD_LAYERS, CLOUD_BOTTOM, CLOUD_TOP, CLOUD_SCALE_X, CLOUD_SCALE_Z } from './cloud-field.js';
 
 export function cloudLayer(sky, sun, field) {
-  const noise = new THREE.Data3DTexture(field, CLOUD_WIDTH, CLOUD_LAYERS, CLOUD_WIDTH);
+  const length = CLOUD_WIDTH * CLOUD_WIDTH * CLOUD_LAYERS * 2;
+  const noise = new THREE.Data3DTexture(field.subarray(0, length), CLOUD_WIDTH, CLOUD_LAYERS, CLOUD_WIDTH);
   noise.format = THREE.RGFormat;
   noise.minFilter = noise.magFilter = THREE.LinearFilter;
   noise.wrapS = noise.wrapR = THREE.RepeatWrapping;
@@ -64,15 +65,11 @@ export function cloudLayer(sky, sun, field) {
     });
     return vec4(result, 1);
   })();
-  // Integrate the same moving density along the sunlight path onto the world.
-  const shadow = Fn(() => {
-    const p = positionWorld;
-    const projected = (h) => p.add(sunlight.mul(float(h).sub(p.y).div(sun.y)));
-    const optical = sampleCloud(projected(bottom + 165)).r.add(
-      sampleCloud(projected(bottom + 340)).r,
-      sampleCloud(projected(bottom + 515)).r,
-    );
-    return optical.mul(-1.52).exp().mul(0.77).add(0.23);
-  })();
+  const mask = new THREE.DataTexture(field.subarray(length), CLOUD_WIDTH, CLOUD_WIDTH, THREE.RedFormat);
+  mask.minFilter = mask.magFilter = THREE.LinearFilter;
+  mask.wrapS = mask.wrapT = THREE.RepeatWrapping;
+  mask.needsUpdate = true;
+  const projected = positionWorld.xz.add(sunlight.xz.mul(float(bottom).sub(positionWorld.y).div(sun.y)));
+  const shadow = texture(mask, projected.add(vec2(clock.mul(3.8), clock.mul(1.3))).mul(vec2(CLOUD_SCALE_X, CLOUD_SCALE_Z))).r;
   return { clock, shadow };
 }

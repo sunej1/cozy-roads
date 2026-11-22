@@ -1,117 +1,34 @@
 import * as THREE from 'three/webgpu';
-import { cameraPosition, positionWorld, referenceAttribute, smoothstep, uniform, positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
+import { cameraPosition, diffuseColor, normalViewGeometry, positionWorld, referenceAttribute, smoothstep, uniform, positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { randomFor } from './route.js';
 
-function branchAtlas() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  const random = randomFor(38484);
-
-  ctx.fillStyle = '#584839';
-  ctx.fillRect(389, 21, 105, 212);
-  for (let i = 0; i < 136; i++) {
-    ctx.strokeStyle = i % 2 ? '#776550' : '#39362e';
-    ctx.globalAlpha = 0.18 + random() * 0.34;
-    ctx.lineWidth = 0.5 + random() * 2.6;
-    const x = 390 + random() * 102;
-    ctx.beginPath();
-    ctx.moveTo(x, 21);
-    ctx.bezierCurveTo(x - 5, 87, x + 7, 163, x - 3, 233);
-    ctx.stroke();
-  }
-
-  ctx.globalAlpha = 1;
-  ctx.lineCap = 'round';
-  const needleColors = ['#334a32', '#435937', '#506940', '#61794d', '#72935c', '#8c9e63'];
-  for (let layer = 0; layer < 2; layer++) {
-    for (let i = 0; i < 18; i++) {
-      const t = (i + random()*.45) / 18;
-      const y = 228 - 205 * t;
-      const reach = (0.16 + 0.74 * Math.sin(t * Math.PI) ** 0.64) * (1 - 0.59 * t) * 164;
-      for (const side of [-1, 1]) {
-        const tipX = 188 + side * reach * (0.64 + random() * 0.38);
-        const tipY = y - (12 + random() * 23) * (1 - 0.42 * t);
-        ctx.strokeStyle = layer ? '#667748' : '#263c2d';
-        ctx.lineWidth = layer ? 1.4 : 3.7;
-        ctx.beginPath();
-        ctx.moveTo(188, y);
-        ctx.quadraticCurveTo((tipX + 188) * 0.5, y + 7, tipX, tipY);
-        ctx.stroke();
-
-        for (let leaf = 0; leaf < 15; leaf++) {
-          const u = leaf / 15;
-          const x = 188 + (tipX - 188) * u;
-          const sy = y + (tipY - y) * u * u;
-          const span = (5 + 17 * (1 - u) * (0.45 + random())) * (1 - t * 0.31);
-          for (const pitch of [-1, 1]) {
-            ctx.strokeStyle = needleColors[Math.floor(random() * needleColors.length)];
-            ctx.lineWidth = (layer ? 1.15 : 1.65) + random() * 1.05;
-            ctx.beginPath();
-            ctx.moveTo(x, sy);
-            ctx.lineTo(x + side * span * 0.76, sy + pitch * span * (0.41 + random() * 0.43));
-            ctx.stroke();
-          }
-        }
-      }
-    }
-  }
-
-  const map = new THREE.CanvasTexture(canvas);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.anisotropy = 4;
-  return map;
-}
-
-const foliageMap = branchAtlas();
 export const coniferMaterial = new THREE.MeshStandardNodeMaterial({
-  map: foliageMap, roughness: 0.92, vertexColors: true, alphaTest: 0.30, side: THREE.DoubleSide,
-  emissive: '#233b22', emissiveMap: foliageMap, emissiveIntensity: 0.3,
+  roughness: 0.93, vertexColors: true, alphaTest: 0.24, side: THREE.DoubleSide,
 });
-export const grassMaterial = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 1, side: THREE.DoubleSide });
+export const grassMaterial = new THREE.MeshStandardNodeMaterial({
+  roughness: 0.95, vertexColors: true, alphaTest: 0.24, side: THREE.DoubleSide,
+});
+export const bladeMaterial = new THREE.MeshStandardNodeMaterial({
+  roughness: 0.96, vertexColors: true, side: THREE.DoubleSide,
+});
+// Both sides of a foliage card represent the same outward-facing canopy.
+bladeMaterial.normalNode = grassMaterial.normalNode = coniferMaterial.normalNode = normalViewGeometry;
+// Transmitted skylight lifts thin leaves above the deep shadow between their roots.
+for (const material of [grassMaterial, bladeMaterial]) {
+  material.emissiveNode = diffuseColor.rgb.mul(0.34);
+}
 export const understoryMaterial = new THREE.MeshStandardNodeMaterial({
   roughness: 0.91, side: THREE.DoubleSide, vertexColors: true, emissive: '#283113', emissiveIntensity: 0.22,
 });
 
-function aspenAtlas() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 512;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  const random = randomFor(99410);
-  const leaves = ['#536238', '#6e853f', '#8c9a4e', '#a6a75b', '#bac56f'];
-  for (let i = 0; i < 1700; i++) {
-    const angle = random() * Math.PI * 2;
-    const clumps = 0.82 + 0.10 * Math.sin(angle * 5) + 0.09 * Math.cos(angle * 9);
-    const radius = Math.sqrt(random()) * clumps;
-    const x = 176 + Math.cos(angle) * radius * 157;
-    const y = 130 + Math.sin(angle) * radius * 116;
-    const size = 1.8 + random() * 4.8;
-    ctx.fillStyle = leaves[Math.floor(random() * leaves.length)];
-    ctx.beginPath();
-    ctx.ellipse(x, y, size, size * 0.48, angle + random(), 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.fillStyle = '#d0cbbb';
-  ctx.fillRect(378, 0, 134, 256);
-  for (let i = 0; i < 86; i++) {
-    const x = 381 + random() * 128;
-    ctx.fillStyle = i % 4 ? '#a4a08e' : '#67665b';
-    ctx.fillRect(x, random() * 256, Math.min(12 + random() * 31, 512 - x), 0.6 + random() * 3.2);
-  }
-  const map = new THREE.CanvasTexture(canvas);
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.anisotropy = 4;
-  return map;
-}
-
-const broadleafMap = aspenAtlas();
 export const aspenMaterial = new THREE.MeshStandardNodeMaterial({
-  map: broadleafMap, roughness: 0.91, alphaTest: 0.40, side: THREE.DoubleSide,
-  emissiveMap: broadleafMap, emissive: '#665831', emissiveIntensity: 0.3,
+  roughness: 0.93, alphaTest: 0.36, side: THREE.DoubleSide,
 });
+export const flowerMaterial = new THREE.MeshStandardNodeMaterial({
+  roughness: 0.93, alphaTest: 0.34, side: THREE.DoubleSide, vertexColors: true,
+});
+flowerMaterial.normalNode = aspenMaterial.normalNode = normalViewGeometry;
 
 for (const material of [coniferMaterial,aspenMaterial]) {
   material.alphaTestNode = smoothstep(1.8,6.8,positionWorld.sub(cameraPosition).length()).oneMinus().mul(.80).add(material.alphaTest);
@@ -128,9 +45,12 @@ aspenMaterial.positionNode = windBend(6.6, 0.31);
 
 export const meadowCenter = uniform(new THREE.Vector2());
 export const meadowRange = uniform(new THREE.Vector2(24, 56));
+export const bladeRange = uniform(new THREE.Vector2(15, 31));
 const tuftRoot = referenceAttribute('instanceMatrix', 'mat4').element(3).xyz;
-const grassScale = smoothstep(meadowRange.x, meadowRange.y, tuftRoot.xz.sub(meadowCenter).length()).oneMinus();
-grassMaterial.positionNode = tuftRoot.add(windBend(0.81, 0.16).sub(tuftRoot).mul(grassScale));
+for (const [material, range] of [[grassMaterial, meadowRange], [bladeMaterial, bladeRange], [flowerMaterial, meadowRange]]) {
+  const scale = smoothstep(range.x, range.y, tuftRoot.xz.sub(meadowCenter).length()).oneMinus();
+  material.positionNode = tuftRoot.add(windBend(0.5, 0.065).sub(tuftRoot).mul(scale));
+}
 
 understoryMaterial.positionNode = windBend(0.61, 0.12);
 
@@ -233,7 +153,13 @@ export function aspen() {
       for (let j = 0; j < uv.count; j++) uv.setX(j, uv.getX(j) * 0.69);
       const vertices = crown.getAttribute('position');
       for (let j = 0; j < vertices.count; j++) vertices.setZ(j, Math.sin(uv.getY(j) * Math.PI) * 0.39);
-      crown.computeVertexNormals();
+      // Shade each leafy spray as a canopy even when seen through its reverse side.
+      const normals = crown.getAttribute('normal');
+      for (let v = 0; v < normals.count; v++) {
+        const nx = vertices.getX(v) * 0.48, ny = 0.78 + vertices.getY(v) * 0.16;
+        const len = Math.hypot(nx, ny, 0.56);
+        normals.setXYZ(v, nx / len, ny / len, 0.56 / len);
+      }
       crown.rotateX((plane - 1) * 0.59).rotateY(angle + plane * 1.047).translate(branch.x, branch.y - 0.23, branch.z);
       parts.push(crown);
     }
@@ -242,40 +168,67 @@ export function aspen() {
 }
 
 export function grassTuft() {
-  const random = randomFor(55217);
-  const positions = [],
-    colors = [],
-    normals = [],
-    indices = [];
-  for (let i = 0; i < 23; i++) {
-    const angle = random() * Math.PI * 2,
-      reach = Math.sqrt(random()) * 0.68;
-    const x = Math.cos(angle) * reach,
-      z = Math.sin(angle) * reach;
-    const heading = angle + (random() - 0.5) * 1.4;
-    const dx = Math.cos(heading),
-      dz = Math.sin(heading);
-    const h = 0.2 + random() * 0.33,
-      width = 0.017 + random() * 0.024,
-      lean = 0.06 + random() * 0.23;
+  const positions = [], normals = [], colors = [], uvs = [], indices = [];
+  // Each curved ribbon carries a photographed stand of grass. Stagger the roots
+  // and bow the middle so the stand also has volume when seen along a ribbon.
+  for (let strip = 0; strip < 4; strip++) {
+    const angle = strip * 2.40;
+    const dx = Math.cos(angle), dz = Math.sin(angle);
+    const width = [0.84, 0.96, 0.83, 0.88][strip], height = [0.25, 0.26, 0.20, 0.24][strip];
     const first = positions.length / 3;
-    for (const t of [0, 0.56, 1]) {
-      for (const side of [-1, 1]) {
-        const w = width * (1 - t) * side;
-        positions.push(x + dx * t * t * lean - dz * w, t * h, z + dz * t * t * lean + dx * w);
-        colors.push(0.28 + 0.82 * t, 0.38 + 0.67 * t, 0.19 + 0.45 * t);
-        normals.push(dx * 0.18, 0.98, dz * 0.18);
+    for (let col = 0; col < 3; col++) {
+      const across = (col - 1) * width / 2;
+      const bow = col === 1 ? 0.08 : -0.03;
+      for (let row = 0; row < 2; row++) {
+        const drift = bow + (strip - 1.5) * 0.15 + row * 0.06;
+        positions.push(across * dx - drift * dz, row * height - 0.035, across * dz + drift * dx);
+        normals.push(dx * (col - 1) * 0.23 - dz * 0.35, 0.92, dz * (col - 1) * 0.23 + dx * 0.35);
+        const shade = row ? 1.16 : 0.88;
+        colors.push(shade, shade, shade);
+        uvs.push(((strip % 2) + 0.009 + col * 0.491) / 2, (1 - Math.floor(strip / 2) + 0.018 + row * 0.964) / 2);
+      }
+      if (col) {
+        const k = first + col * 2;
+        indices.push(k - 2, k - 1, k, k, k - 1, k + 1);
       }
     }
-    indices.push(first, first + 1, first + 2, first + 1, first + 3, first + 2, first + 2, first + 3, first + 4);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geometry.setIndex(indices);
+  return geometry;
+}
+
+export function meadowFlowers() {
+  const positions = [], normals = [], uvs = [], colors = [], indices = [];
+  function leaf(x, y, z, radius, corner, warm) {
+    const first = positions.length / 3;
+    const tint = warm ? [1.10, 0.96, 0.75] : [0.82, 1.11, 0.73];
+    for (const [u, v] of [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]]) {
+      positions.push(x + (u - 0.5) * radius, y + (u - v) * radius * 0.18 + (u === 0.5 ? -0.009 : 0),
+        z + (0.5 - v) * radius);
+      normals.push((u - 0.5) * 0.3, 0.97, (0.5 - v) * 0.3);
+      colors.push(...tint);
+      uvs.push(corner + u * 0.496, v);
+    }
+    for (let i = 0; i < 4; i++) indices.push(first + i, first + (i + 1) % 4, first + 4);
+  }
+  for (const [x, z, h] of [[0, 0, 0.36], [0.14, -0.11, 0.43], [-0.18, 0.16, 0.29]]) {
+    const first = positions.length / 3;
+    for (const [dx, y] of [[-0.002, 0], [0.002, 0], [-0.002, h], [0.002, h]]) {
+      positions.push(x + dx + 0.08 * y, y, z - y * 0.13);
+      normals.push(0, 0.9, 0.36); colors.push(0.47, 0.68, 0.31); uvs.push(0.75, 0.50);
+    }
+    indices.push(first, first + 1, first + 2, first + 2, first + 1, first + 3);
+    leaf(x + h * 0.08, h, z - h * 0.13, 0.085, 0, true);
+    leaf(x - 0.012, h * 0.44, z + 0.015, 0.155, 0.5, false);
   }
   const g = new THREE.BufferGeometry();
-  for (const [name, data] of [
-    ['position', positions],
-    ['color', colors],
-    ['normal', normals],
-  ])
-    g.setAttribute(name, new THREE.Float32BufferAttribute(data, 3));
+  for (const [key, data, components] of [['position', positions, 3], ['normal', normals, 3],
+    ['color', colors, 3], ['uv', uvs, 2]]) g.setAttribute(key, new THREE.Float32BufferAttribute(data, components));
   g.setIndex(indices);
   return g;
 }

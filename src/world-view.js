@@ -8,7 +8,7 @@ import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CHUNK_LENGTH, mix, noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 import { atmosphere, makeSky, makeReliefTexture, makeTerrainMaterial, makeWater, skyEnvironment, SUN } from './landscape.js';
-import { aspen, aspenMaterial, conifer, coniferMaterial, distantConifer, understory, understoryMaterial } from './forest.js';
+import { aspen, aspenMaterial, conifer, coniferMaterial, grassMaterial, bladeMaterial, flowerMaterial, distantConifer, understory, understoryMaterial } from './forest.js';
 import { bandBounds, buildTerrain, terrainBand, TERRAIN_STEP as STEP, tileSurface } from './terrain.js';
 
 const paintMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91 });
@@ -331,11 +331,15 @@ export class WorldView {
     }
     this.chunks = new Map();
     this.terrainRevision = 0;
+    coniferMaterial.map = assets.bough;
+    grassMaterial.map = assets.clumps;
+    aspenMaterial.map = assets.spray;
+    flowerMaterial.map = assets.blossoms;
     this.treeline = new Treeline(scene, world, (s,x) => this.surfaceHeight(s,x));
-    this.meadow = new Meadow(scene, world, (s,x) => this.surfaceHeight(s,x));
+    this.meadow = new Meadow(scene, world, (s,x) => this.surfaceHeight(s,x), assets.leaves, assets.middleLeaves);
     const reliefMap = makeReliefTexture(assets.elevations);
-    this.terrainMaterial = makeTerrainMaterial(reliefMap);
-    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, true);
+    this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock);
+    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, true);
     this.horizon = new Horizon(scene, world, this.terrainMaterial, (id, band) => this.chunks.has(id + ':' + band));
     this.roadMaterial = new THREE.MeshStandardMaterial({
       vertexColors: true, map: assets.pavement, normalMap: assets.normal,
@@ -344,17 +348,18 @@ export class WorldView {
     this.rockModels = assets.rocks;
     this.far = atmosphere(scene);
     this.sky = makeSky();
-    this.water = makeWater();
     scene.environment = skyEnvironment();
-    scene.environmentIntensity = 0.74;
+    scene.environmentIntensity = 0.48;
 
-    const skyLight = new THREE.HemisphereLight('#c6deff', '#a39c77', 0.99);
-    this.sun = new THREE.DirectionalLight('#ffe8c5', 3.28);
+    const skyLight = new THREE.HemisphereLight('#c2d9f6', '#8a805b', 0.82);
+    this.sun = new THREE.DirectionalLight('#ffdfb0', 4.45);
     this.sun.position.copy(SUN).multiplyScalar(125);
     this.sun.castShadow = true;
     this.clouds = cloudLayer(this.sky, SUN, assets.clouds);
     this.mountainLight = mountainLight(world, SUN);
-    this.sun.shadow.shadowNode = shadow(this.sun).mul(this.mountainLight.visibility, this.clouds.shadow);
+    const sunlight = this.mountainLight.visibility.mul(this.clouds.shadow);
+    this.water = makeWater(sunlight);
+    this.sun.shadow.shadowNode = shadow(this.sun).mul(sunlight);
     this.sun.shadow.mapSize.set(2048, 2048);
     Object.assign(this.sun.shadow.camera, { left: -56, right: 56, top: 56, bottom: -56, near: 10, far: 285 });
     this.sun.shadow.camera.updateProjectionMatrix();
@@ -373,6 +378,7 @@ export class WorldView {
     ground.setAttribute('position', new THREE.BufferAttribute(tile.position, 3));
     ground.setAttribute('normal', new THREE.BufferAttribute(tile.normal, 3));
     ground.setAttribute('reliefField', new THREE.BufferAttribute(tile.relief, 4));
+    ground.setAttribute('roadOffset', new THREE.BufferAttribute(tile.roadOffset, 1));
     ground.setIndex(new THREE.BufferAttribute(tile.index, 1));
     const groundMesh = new THREE.Mesh(ground, this.low ? this.lowTerrainMaterial : this.terrainMaterial);
     groundMesh.receiveShadow = true;

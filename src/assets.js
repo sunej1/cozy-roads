@@ -1,14 +1,22 @@
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import meadowClumps from '../assets/meadow-clumps.webp';
+import meadowLeaves from '../assets/meadow-leaves.glb?url';
+import meadowFloor from '../assets/meadow-floor.webp';
+import floweringMeadow from '../assets/meadow-flowers.webp';
+import aspenSpray from '../assets/aspen-spray.webp';
+import firBough from '../assets/fir-bough.webp';
+import rockAndGravel from '../assets/rock-and-gravel.webp';
 import asphaltColor from '../assets/asphalt-color.jpg';
 import asphaltNormal from '../assets/asphalt-normal.jpg';
 import asphaltRough from '../assets/asphalt-rough.jpg';
 import boulders from '../assets/mossy-boulders.glb?url';
 
-async function loadField(url, ArrayType) {
+async function loadField(url, ArrayType, gzip = false) {
   const response = await fetch(url);
   if (!response.ok) throw new Error('Could not load ' + url.pathname);
-  return new ArrayType(await response.arrayBuffer());
+  const body = gzip ? new Response(response.body.pipeThrough(new DecompressionStream('gzip'))) : response;
+  return new ArrayType(await body.arrayBuffer());
 }
 
 export async function loadLandscapeAssets() {
@@ -21,10 +29,11 @@ export async function loadLandscapeAssets() {
     return map;
   }
 
-  const [pavement, normal, rough, scans, elevations, clouds] = await Promise.all([
+  const [pavement, normal, rough, scans, elevations, clouds, clumps, turf, bough, blades, bedrock, blossoms, spray] = await Promise.all([
     load(asphaltColor, true), load(asphaltNormal), load(asphaltRough),
     new GLTFLoader().loadAsync(boulders), loadField(new URL('../assets/shuksan.u16', import.meta.url), Uint16Array),
-    loadField(new URL('../assets/cloud-field.u8', import.meta.url), Uint8Array),
+    loadField(new URL('../assets/cloud-field.bin', import.meta.url), Uint8Array, true),
+    load(meadowClumps, true), load(meadowFloor, true), load(firBough, true), new GLTFLoader().loadAsync(meadowLeaves), load(rockAndGravel), load(floweringMeadow, true), load(aspenSpray, true),
   ]);
   const rocks = [];
   scans.scene.traverse(object => {
@@ -42,5 +51,5 @@ export async function loadLandscapeAssets() {
     }
     rocks.push({ geometry, material: object.material });
   });
-  return { pavement, normal, rough, rocks, elevations, clouds };
+  return { pavement, normal, rough, rocks, elevations, clouds, clumps, turf, bough, bedrock, blossoms, spray, leaves: blades.scene.getObjectByName('Meadow').geometry, middleLeaves: blades.scene.getObjectByName('MeadowMid').geometry };
 }

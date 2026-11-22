@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { RELIEF_SIZE } from './highlands.js';
-import { randomFor } from './route.js';
+import { randomFor, ROAD_EDGE } from './route.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import {
   attribute, cameraPosition, color, dot, float, fog, mix, normalViewGeometry, normalWorldGeometry, positionView, positionWorld, reflector,
@@ -89,7 +89,7 @@ export function skyEnvironment() {
   return map;
 }
 
-export function makeWater() {
+export function makeWater(sunVisibility) {
   const clock = uniform(0);
   const anchor = new THREE.Object3D();
   anchor.rotation.x = -Math.PI / 2;
@@ -116,7 +116,7 @@ export function makeWater() {
   const lakeColor = mix(color('#153d49'), shoal, shallows.mul(0.90));
   const surfaceScatter = wave1.sin().mul(0.56).add(wave2.sin().mul(0.23)).mul(waveFalloff).mul(0.025);
   const sunlight = vec3(SUN.x, SUN.y, SUN.z);
-  const glint = dot(waterNormal, sunlight.add(view).normalize()).max(0).pow(190).mul(1.12);
+  const glint = dot(waterNormal, sunlight.add(view).normalize()).max(0).pow(190).mul(1.12, sunVisibility);
   const skyTint = mix(color('#759fae'), color('#e5cbb0'), dot(view.negate(), sunlight).max(0).pow(6));
   const distortion = vec2(ripple.x, ripple.y).mul(0.135).mul(smoothstep(0, 6, bank));
   const reflected = planar.sample(screenUV.flipX().add(distortion).clamp(0.004, 0.996)).rgb;
@@ -127,7 +127,7 @@ export function makeWater() {
   const material = new THREE.MeshBasicNodeMaterial();
   const lowMaterial = new THREE.MeshBasicNodeMaterial();
   for (const [surface, reflection] of [[material, path], [lowMaterial, skyTint]]) {
-    surface.colorNode = mix(lakeColor, reflection, fresnel.mul(0.89))
+    surface.colorNode = mix(lakeColor.mul(sunVisibility.mul(0.26).add(0.74)), reflection, fresnel.mul(0.89))
       .add(surfaceScatter).add(color('#ffce92').mul(glint).mul(1.28)).add(color('#b9afa0').mul(foamEdge));
   }
 
@@ -219,18 +219,18 @@ function surveyDetail(map) {
   return mix(residual(uv), residual(rotated), basis.z).mul(basis.w, 0.67).toVar();
 }
 
-export function makeTerrainMaterial(reliefMap, low = false) {
+export function makeTerrainMaterial(reliefMap, turf, bedrock, low = false) {
   const material = new THREE.MeshStandardNodeMaterial();
   const p = positionWorld,
     nWorld = normalWorldGeometry.normalize();
   const axes = nWorld.abs().pow(4);
   const weights = axes.div(axes.x.add(axes.y, axes.z)).toVar();
-  function triplanar(scale) {
-    return texture(mineralNoise, p.zy.mul(scale))
+  function triplanar(scale, map = mineralNoise) {
+    return texture(map, p.zy.mul(scale))
       .mul(weights.x)
       .add(
-        texture(mineralNoise, p.xz.mul(scale)).mul(weights.y),
-        texture(mineralNoise, p.xy.mul(scale)).mul(weights.z),
+        texture(map, p.xz.mul(scale)).mul(weights.y),
+        texture(map, p.xy.mul(scale)).mul(weights.z),
       )
       .toVar();
   }
@@ -238,29 +238,18 @@ export function makeTerrainMaterial(reliefMap, low = false) {
     grain = triplanar(0.148);
   const zoom = p.sub(cameraPosition).length();
   const macro = texture(mineralNoise, vec2(p.x.add(p.z.mul(0.34)), p.z.sub(p.x.mul(0.26))).mul(0.00074)).toVar();
-  const meadow = mix(
-    color('#455e36'),
-    color('#a0a068'),
+  const meadowTint = mix(
+    color('#64763b'),
+    color('#abb361'),
     field.r.mul(0.52).add(field.g.mul(0.36), field.b.mul(0.12)),
   );
+  const sod = texture(turf, p.xz.mul(0.42).add(field.rg.mul(0.18))).rgb.toVar();
+  const meadow = meadowTint.mul(sod.mul(3.3).add(0.30));
   const residual = surveyDetail(reliefMap);
   const aspect = dot(nWorld, vec3(0.74, 0, -0.42));
-  // Two intersecting joint sets break up folded beds into separate rock faces.
-  const warp = field.g.sub(0.5).mul(3.3).add(macro.r.mul(10));
-  const bed = p.y.mul(0.25).add(p.x.mul(0.048), p.z.mul(0.083), warp).sin().abs();
-  const joint = p.x
-    .mul(0.18)
-    .sub(p.y.mul(0.075))
-    .add(p.z.mul(0.12), field.r.mul(4.4), grain.g.mul(0.5))
-    .sin()
-    .abs();
-  const fissure = smoothstep(0.03, 0.18, bed.min(joint)).oneMinus();
-  const strata = mix(
-    color('#575c60'),
-    color('#9e988b'),
-    field.r.mul(0.48).add(field.b.mul(0.25), macro.g.mul(0.27)),
-  );
-  const stone = strata.mul(fissure.mul(-0.18).add(1), grain.g.mul(0.14).add(0.94));
+  const outcrop = triplanar(0.057, bedrock);
+  const strata = mix(color('#555c63'), color('#aca898'), field.r.mul(0.56).add(macro.g.mul(0.44)));
+  const stone = strata.mul(outcrop.r.mul(0.96).add(outcrop.g.mul(0.18), 0.43));
   const high = p.y.add(macro.r.sub(0.5).mul(110));
   const exposed = smoothstep(0.45, 0.83, nWorld.y)
     .oneMinus()
@@ -277,12 +266,18 @@ export function makeTerrainMaterial(reliefMap, low = false) {
   const canopy = mix(color('#273e38'), color('#566449'), field.b.mul(0.6).add(grain.g.mul(0.4)));
   const drifts = mix(color('#b1c3cf'), color('#faf8ef'), field.g.mul(0.38).add(0.46));
   const coarse = mix(mix(mix(meadow, canopy, forest), stone, exposed), drifts, snow);
-  material.colorNode = coarse.mul(grain.a.mul(0.14).add(grain.b.mul(0.12), 0.87));
+  const roadside = attribute('roadOffset', 'float').abs();
+  const gravel = texture(bedrock, p.xz.mul(0.64)).b;
+  const shoulder = smoothstep(ROAD_EDGE + 0.26, ROAD_EDGE + 1.24, roadside
+    .add(gravel.sub(0.5).mul(0.52), field.g.sub(0.5).mul(0.88))).oneMinus()
+    .mul(smoothstep(140, 240, zoom).oneMinus());
+  const aggregate = mix(color('#53524b'), color('#a69c82'), gravel);
+  material.colorNode = mix(coarse, aggregate, shoulder).mul(grain.a.mul(0.14).add(grain.b.mul(0.12), 0.87));
   material.roughnessNode = mix(0.94, 0.66, snow);
   if (low) return material;
   const near = smoothstep(60, 390, zoom).oneMinus();
-  const crag = field.g.mul(0.62).add(field.b.mul(0.4), fissure.mul(-0.33), grain.g.mul(near).mul(0.09));
-  const relief = crag.mul(exposed, snow.mul(-0.72).add(1)).add(grain.b.mul(near).mul(0.038)).toVar();
+  const crag = outcrop.g.mul(1.12).add(field.g.mul(0.36), grain.g.mul(near).mul(0.08));
+  const relief = crag.mul(exposed, snow.mul(-0.72).add(1)).add(grain.b.mul(near).mul(0.038), sod.g.mul(near).mul(exposed.oneMinus()).mul(0.032), gravel.mul(shoulder).mul(0.03)).toVar();
   const n = normalViewGeometry.normalize();
   const dx = positionView.dFdx();
   const dy = positionView.dFdy();

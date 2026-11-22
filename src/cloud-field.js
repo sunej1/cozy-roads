@@ -5,4 +5,4 @@ export const CLOUD_BOTTOM = 1730;
 export const CLOUD_TOP = 2420;
 export const CLOUD_SCALE_X = 0.000105;
 export const CLOUD_SCALE_Z = 0.00013;
-export const SUN_DIRECTION = [-0.84, 0.48, 0.23];
+export const SUN_DIRECTION = [-0.84, 0.51, -0.43];
