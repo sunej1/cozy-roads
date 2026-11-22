@@ -1,4 +1,4 @@
-import { mix, noise, randomFor } from './route.js';
+import { clamp, mix, noise, randomFor, smooth } from './route.js';
 
 export const RELIEF_SIZE = 768;
 const SIZE = RELIEF_SIZE;
@@ -6,6 +6,30 @@ function mirror(n) {
   const period = 2 * (SIZE - 1);
   const p = ((n % period) + period) % period;
   return Math.min(p, period - p);
+}
+
+// Amplify survey-scale buttresses and cut tilted ledges into steep bedrock.
+// All consumers use this field, including tires, the worker and the shading normals.
+export function carveBedrock(source) {
+  if (source.length !== SIZE * SIZE) throw new Error('Incomplete Shuksan elevation raster');
+  const result = new Uint16Array(source.length);
+  for (let z = 0; z < SIZE; z++) {
+    const north = Math.max(0, z - 6) * SIZE, south = Math.min(SIZE - 1, z + 6) * SIZE;
+    for (let x = 0; x < SIZE; x++) {
+      const i = z * SIZE + x;
+      const west = source[z * SIZE + Math.max(0, x - 6)], east = source[z * SIZE + Math.min(SIZE - 1, x + 6)];
+      const up = source[north + x], down = source[south + x];
+      const slope = Math.hypot(east - west, down - up) / (4 * 12 * 19.75);
+      const strength = smooth(0.22, 0.76, slope);
+      const prominence = (source[i] - (west + east + up + down) * 0.25) / 4;
+      const bed = (source[i] / 4 + x * 3.7 - z * 2.4 + 74 * noise(x / 29, z / 31)) / 79;
+      const phase = bed - Math.floor(bed);
+      const ledge = (smooth(0.32, 0.64, phase) - phase) * 43;
+      const change = strength * (clamp(prominence * 0.85, -38, 38) + ledge);
+      result[i] = clamp(Math.round(source[i] + 4 * change), 0, 65535);
+    }
+  }
+  return result;
 }
 
 // Warp and cross-blend two orientations of the surveyed relief. A summit keeps

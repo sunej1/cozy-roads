@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { smoothstep, uv, vec3 } from 'three/tsl';
+import { smoothstep, uniform, uv, vec3 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import panorama from '../assets/vehicles/kloppenheim.jpg';
 import wagon from '../assets/vehicles/wagon.glb?url';
@@ -42,16 +42,17 @@ function makeVehicle(root, environment) {
   const shadowMaterial = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false });
   const distance = uv().sub(0.5).abs().mul(2);
   shadowMaterial.colorNode = vec3(0.019, 0.025, 0.021);
+  const shadowStrength = uniform(0.53);
   shadowMaterial.opacityNode = smoothstep(0.16, 1, distance.x.pow(3).add(distance.y.pow(4)))
     .oneMinus()
-    .mul(0.53);
+    .mul(shadowStrength);
   const shadow = new THREE.Mesh(new THREE.PlaneGeometry(width, length).rotateX(-Math.PI / 2), shadowMaterial);
-  shadow.position.y = 0.045;
-  root.add(shadow);
   root.rotation.order = 'YXZ';
   return {
     root,
     tires,
+    contactShadow: shadow,
+    shadowStrength,
     brake: (active) => {
       brakeLamp.emissiveIntensity = active ? 4 : 0.42;
     },

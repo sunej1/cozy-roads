@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. **Esc** pauses the drive. Manual steering works on and off the road. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
+Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. **Esc** pauses the drive. Manual steering works on and off the road. Gravity changes your speed on hills. Fast crests can lift the tires, and steering takes effect again when they land. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
 
 ## Explore a world
 

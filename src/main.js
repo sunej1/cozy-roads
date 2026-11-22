@@ -6,7 +6,7 @@ import { driverEye } from './forest.js';
 import { WorldView } from './world-view.js';
 import { createWorld, parseSeed } from './world.js';
 import { makeCinematic } from './cinematic.js';
-import { ROAD_EDGE, BENCHMARK_SECONDS, clamp, drive, joinRoad, mix, newCarState, surfaceAt, TOUR_SPEED } from './route.js';
+import { ROAD_EDGE, BENCHMARK_SECONDS, clamp, drive, groundPose, joinRoad, mix, newCarState, surfaceAt, TOUR_SPEED } from './route.js';
 import { VEHICLES, vehicleId } from './vehicles.js';
 import { RecentFrames, ResolutionBudget, summarize } from './timing.js';
 
@@ -138,9 +138,9 @@ function chooseVehicle(value, persist = true) {
   selectedVehicle = id;
   ui.vehicle.value = id;
   ui['vehicle-description'].textContent = VEHICLES[id].description;
-  if (model) scene.remove(model.root);
+  if (model) scene.remove(model.root, model.contactShadow);
   model = models.get(id);
-  scene.add(model.root);
+  scene.add(model.root, model.contactShadow);
   if (persist) {
     const url = new URL(location.href);
     url.searchParams.set('car', id);
@@ -163,16 +163,15 @@ function poseScene(blend) {
   const forwardX = Math.sin(heading);
   const forwardS = Math.cos(heading);
   const y = height(s, x);
-  const wheelbase = vehicle.wheelbase * 0.5;
-  const halfWidth = vehicle.width * 0.46;
-  const frontY = height(s + forwardS * wheelbase, x + forwardX * wheelbase);
-  const rearY = height(s - forwardS * wheelbase, x - forwardX * wheelbase);
-  const rightY = height(s - forwardX * halfWidth, x + forwardS * halfWidth);
-  const leftY = height(s + forwardX * halfWidth, x - forwardS * halfWidth);
-  const pitch = clamp(Math.atan2(frontY - rearY, wheelbase * 2), -0.63, 0.63);
-  const roll = clamp(Math.atan2(rightY - leftY, halfWidth * 2), -0.61, 0.61);
-  const bodyLean = car.steering * clamp(Math.abs(car.speed) / 26, 0, 1) * (0.14 - vehicle.suspension * 0.09);
-  model.root.position.set(x, mix(y, (frontY + rearY + leftY + rightY) * 0.25, 0.68), -s);
+  const ground = groundPose(s, x, heading, height, vehicle);
+  const lift = mix(previousPose.clearance ?? 0, car.clearance, alpha);
+  const pitch = mix(previousPose.pitch ?? ground.pitch, car.pitch ?? ground.pitch, alpha);
+  const roll = mix(previousPose.roll ?? ground.roll, car.roll ?? ground.roll, alpha);
+  const bodyLean = (1 - clamp(lift / 0.2, 0, 1)) * car.steering * clamp(Math.abs(car.speed) / 26, 0, 1) * (0.14 - vehicle.suspension * 0.09);
+  model.root.position.set(x, ground.y + lift, -s);
+  model.contactShadow.position.set(x, ground.y + 0.045, -s);
+  model.contactShadow.rotation.set(ground.pitch, -heading, ground.roll, 'YXZ');
+  model.shadowStrength.value = 0.53 / (1 + lift * 3);
   driverEye.value.copy(model.root.position);
   driverEye.value.y += 0.88;
   model.brake(mode === 'driving' && input.brake && car.speed >= 0);
@@ -436,7 +435,7 @@ function frame(now) {
 
   if (isMoving() || needsRender) {
     poseScene(1 - Math.exp(-11 * Math.min(delta / 1000, 0.13)));
-    const onGrass = Math.abs(model.root.position.x - world.centerX(-model.root.position.z)) > ROAD_EDGE - 1.1;
+    const onGrass = car.clearance < 0.025 && Math.abs(model.root.position.x - world.centerX(-model.root.position.z)) > ROAD_EDGE - 1.1;
     landscape.tracks.update(now / 1000, model.root, model.tires, onGrass);
     landscape.animate(now / 1000, camera, car);
     if (useCinematic) {

@@ -4,12 +4,13 @@ import { readFileSync } from 'node:fs';
 import { CHUNK_LENGTH, drive, newCarState, ROAD_EDGE, surfaceAt, TOUR_SPEED } from '../src/route.js';
 import { bandBounds, buildTerrain, terrainBand, TERRAIN_COLUMNS } from '../src/terrain.js';
 import { createWorld as seededWorld, DEFAULT_SEED, parseSeed, REGION_LENGTH } from '../src/world.js';
+import { carveBedrock } from '../src/highlands.js';
 import { mountainPage } from '../src/horizon.js';
 import { VEHICLES, vehicleId } from '../src/vehicles.js';
 import { RecentFrames, ResolutionBudget, summarize } from '../src/timing.js';
 
 const raster = readFileSync(new URL('../assets/shuksan.u16', import.meta.url));
-const elevations = new Uint16Array(raster.buffer, raster.byteOffset, raster.byteLength / 2);
+const elevations = carveBedrock(new Uint16Array(raster.buffer, raster.byteOffset, raster.byteLength / 2));
 const createWorld = seed => seededWorld(seed, elevations);
 
 test('adaptive resolution ignores an isolated long frame and responds to sustained pressure', () => {
@@ -366,4 +367,72 @@ test('quality changes keep the meadow visible while cell densities are replaced'
     while (meadow.pending.length) { meadow.update(car, low); sample(); }
     assert.ok([...meadow.cells.values()].every(cell => cell.low === low));
   }
+});
+
+test('gravity rolls downhill, slows an uphill coast and leaves a cross-slope car planted', () => {
+  const world = { centerX: () => 0, routePose: () => ({ length: 1, yaw: 0 }) };
+  const coast = (height, speed) => {
+    const car = { ...newCarState(world), speed };
+    for (let i = 0; i < 120; i++) drive(car, 1 / 120, {}, false, world, height, VEHICLES.wagon);
+    return car;
+  };
+  const downhill = coast(s => 100 - s * 0.16, 0);
+  assert.ok(downhill.s > 0.4 && downhill.speed > 1);
+  assert.equal(downhill.clearance, 0);
+  assert.ok(coast(s => 100 + s * 0.16, 12).speed < coast(() => 100, 12).speed);
+  const crossSlope = coast((s, x) => 100 + x * 0.38, 12);
+  assert.equal(crossSlope.x, 0);
+  assert.ok(crossSlope.roll > 0.3);
+});
+
+test('a crest launches the car, gravity brings it down, and steering stays predictable', () => {
+  const world = { centerX: () => 0, routePose: () => ({ length: 1, yaw: 0 }) };
+  const height = s => 100 + Math.min(s, 0) * 0.30;
+  for (const vehicle of Object.values(VEHICLES)) {
+    const car = { ...newCarState(world), speed: 20, s: -5 };
+    let peak = 0, flight = 0, landed = false;
+    for (let i = 0; i < 350; i++) {
+      const airborne = car.clearance > 0;
+      const oldVelocity = car.verticalSpeed, oldSpeed = car.speed;
+      drive(car, 1 / 120, { right: airborne, throttle: airborne }, false, world, height, vehicle);
+      peak = Math.max(peak, car.clearance);
+      if (airborne && car.clearance > 0) {
+        assert.ok(Math.abs(car.verticalSpeed - oldVelocity + 9.81 / 120) < 1e-10);
+        assert.equal(car.speed, oldSpeed);
+        assert.equal(car.heading, 0);
+        flight++;
+      }
+      if (airborne && car.clearance === 0) { landed = true; break; }
+    }
+    assert.ok(landed && peak > 0.75 && peak < 2.3 && flight > 75, vehicle.name);
+    for (let i = 0; i < 120; i++) drive(car, 1 / 120, { right: true }, false, world, height, vehicle);
+    assert.equal(car.clearance, 0);
+    assert.ok(car.heading > 0.3);
+  }
+});
+
+test('bedrock shaping preserves flat elevations and changes the surveyed cliff relief', () => {
+  const original = new Uint16Array(raster.buffer, raster.byteOffset, raster.byteLength / 2);
+  const plain = new Uint16Array(original.length).fill(2400);
+  assert.deepEqual(carveBedrock(plain), plain);
+  let incised = 0, raised = 0;
+  for (let i = 0; i < original.length; i++) {
+    const delta = elevations[i] - original[i];
+    if (delta < -24) incised++;
+    if (delta > 24) raised++;
+  }
+  assert.ok(incised > 1000 && raised > 1000);
+});
+
+test('a narrow flooded ditch can be cleared in the air while deep water stops the tires', () => {
+  const world = { centerX: () => 0, routePose: () => ({ length: 1, yaw: 0 }) };
+  const vehicle = VEHICLES.trail;
+  const water = s => s <= 0 || s >= 3 ? 0.25 : -3;
+  const jump = { ...newCarState(world), s: -1, speed: 12, pitch: 0, clearance: 1.5, verticalSpeed: 1 };
+  for (let i = 0; i < 55; i++) drive(jump, 1 / 120, {}, false, world, water, vehicle);
+  assert.ok(jump.s > 3 && jump.speed > 10);
+  const coast = { ...newCarState(world), s: -4, speed: 4 };
+  for (let i = 0; i < 1200; i++) drive(coast, 1 / 120, { throttle: true }, false, world, s => 1 - Math.max(0, s) * 0.10, vehicle);
+  assert.ok(coast.s > 10 * (1 + vehicle.ford) - 0.15 && coast.s <= 10 * (1 + vehicle.ford));
+  assert.equal(coast.speed, 0);
 });

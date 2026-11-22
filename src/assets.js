@@ -1,3 +1,4 @@
+import { carveBedrock } from './highlands.js';
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import meadowClumps from '../assets/meadow-clumps.webp';
@@ -82,7 +83,7 @@ export async function loadLandscapeAssets() {
     normal,
     rough,
     rocks,
-    elevations,
+    elevations: carveBedrock(elevations),
     clouds,
     clumps,
     turf,

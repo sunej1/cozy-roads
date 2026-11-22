@@ -21,9 +21,10 @@ export function atmosphere(scene, visibilityAt) {
   const heightDelta = first.sub(last).abs().mul(0.022);
   const lowAir = lower.mul(-0.022).exp()
     .mul(heightDelta.lessThan(0.001).select(1, heightDelta.negate().exp().oneMinus().div(heightDelta.max(0.001))));
-  const extinction = distance.mul(float(0.000105).add(lowAir.mul(0.00042)));
+  const clearAir = first.add(last).mul(-0.5 / 2400).exp().mul(0.000097);
+  const extinction = distance.mul(clearAir.add(lowAir.mul(0.00042)));
   const aerial = extinction.negate().exp().oneMinus();
-  const cover = smoothstep(far.mul(0.78), far, distance);
+  const cover = smoothstep(far.mul(0.87), far, ray.xz.length());
   const glow = dot(ray.normalize(), vec3(SUN.x, SUN.y, SUN.z)).max(0).pow(7);
   const highAir = mix(color('#6687ac'), color('#b6cbd6'), smoothstep(800, 7400, distance));
   // Sample the air between the driver and the ridge so mist also catches sunlight.
@@ -263,8 +264,19 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
   const residual = surveyDetail(reliefMap);
   const aspect = dot(nWorld, vec3(0.74, 0, -0.42));
   const outcrop = triplanar(p.mul(0.057), weights, bedrock);
-  const strata = mix(color('#555c63'), color('#aca898'), field.r.mul(0.56).add(macro.g.mul(0.44)));
-  const stone = strata.mul(outcrop.r.mul(0.96).add(outcrop.g.mul(0.18), 0.43));
+  // Project the fractured scan in dipping beds hundreds of metres across.
+  // Individual ledges then cover several pixels even on a distant ridge.
+  const dip = p.y.add(p.x.mul(0.23), p.z.mul(0.10), macro.r.sub(0.5).mul(92));
+  const strike = p.x.add(p.z.mul(0.42));
+  const cross = p.z.sub(p.x.mul(0.38));
+  const blocks = texture(bedrock, vec2(strike, cross.mul(0.67).add(dip.mul(1.73))).mul(0.0029)).toVar();
+  const ledges = texture(bedrock, vec2(cross, strike.mul(0.76).sub(dip.mul(1.21))).mul(0.0093)).toVar();
+  const face = blocks.g.mul(0.73).add(ledges.g.mul(0.27)).toVar();
+  const mineral = smoothstep(0.26, 0.70, blocks.r.mul(0.65).add(macro.g.mul(0.35)));
+  const strata = mix(color('#48505a'), color('#c1ad92'), mineral);
+  const recess = smoothstep(0.24, 0.67, face.add(residual.z.mul(0.0028)));
+  const stone = strata.mul(blocks.r.mul(0.86).add(ledges.r.mul(0.49), outcrop.r.mul(0.48), 0.31),
+    recess.mul(0.48).add(0.63));
   const high = p.y.add(macro.r.sub(0.5).mul(110));
   const exposed = smoothstep(0.45, 0.83, nWorld.y)
     .oneMinus()
@@ -272,7 +284,10 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
   const shelter = residual.z.negate().clamp(-40, 40).mul(4.8).add(aspect.mul(80), field.r.sub(0.5).mul(115));
   const snowline = smoothstep(325, 750, high.add(shelter));
   const adhesion = smoothstep(0.38, 0.84, nWorld.y.add(aspect.mul(0.12), field.g.sub(0.5).mul(0.2)));
-  const snow = smoothstep(0.27, 0.74, snowline.mul(adhesion));
+  const ribs = smoothstep(0.46, 0.72, face.add(residual.z.mul(0.004)));
+  const steep = smoothstep(0.64, 0.98, nWorld.y).oneMinus();
+  const snow = smoothstep(0.27, 0.74, snowline.mul(adhesion))
+    .mul(smoothstep(0.17, 0.69, steep.mul(ribs.mul(0.77).add(0.23))).oneMinus());
   const forest = smoothstep(0.28, 0.66, macro.g.mul(0.68).add(field.r.mul(0.32))).mul(
     smoothstep(180, 440, high).oneMinus(),
     smoothstep(0.53, 0.8, nWorld.y),
@@ -294,10 +309,13 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
   const pebbles = mix(color('#655e4d'), color('#b4a58a'), gravel).mul(wet.mul(-0.44).add(1));
   material.colorNode = mix(mix(coarse, pebbles, strand), aggregate, shoulder).mul(grain.a.mul(0.14).add(grain.b.mul(0.12), 0.87));
   material.roughnessNode = mix(mix(0.94, 0.47, strand.mul(wet)), 0.66, snow);
-  if (low) return material;
+
   const near = smoothstep(60, 390, zoom).oneMinus();
   const crag = outcrop.g.mul(1.12).add(field.g.mul(0.36), grain.g.mul(near).mul(0.08));
-  const relief = crag.mul(exposed, snow.mul(-0.72).add(1)).add(grain.b.mul(near).mul(0.038), sod.g.mul(near).mul(exposed.oneMinus()).mul(0.032), gravel.mul(shoulder).mul(0.03)).toVar();
+  const cliffRelief = blocks.g.mul(32).add(ledges.g.mul(6.5)).mul(exposed);
+  const detail = low ? float(0) : crag.mul(exposed).add(grain.b.mul(near, 0.038),
+    sod.g.mul(near, exposed.oneMinus(), 0.032), gravel.mul(shoulder, 0.03));
+  const relief = cliffRelief.add(detail).mul(snow.mul(-0.95).add(1)).toVar();
   const n = normalViewGeometry.normalize();
   const dx = positionView.dFdx();
   const dy = positionView.dFdy();
