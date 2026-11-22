@@ -1,68 +1,17 @@
 import * as THREE from 'three/webgpu';
-import { conifer, coniferMaterial } from './forest.js';
+import { coniferMaterial } from './forest.js';
 import { noise, randomFor, smooth } from './route.js';
 
 const SIZE = 384;
 const dummy = new THREE.Object3D();
 const tint = new THREE.Color();
 
-function crownCards() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 96;
-  canvas.height = 192;
-  const ctx = canvas.getContext('2d');
-  const random = randomFor(19831);
-  ctx.fillStyle = '#5b5246';
-  ctx.fillRect(46, 16, 4, 173);
-  for (let tier = 0; tier < 39; tier++) {
-    const f = tier / 39,
-      y = 16 + f * 144;
-    for (const sign of [-1, 1]) {
-      const width = (3 + 41 * f ** 0.78) * (0.65 + 0.34 * random());
-      const shade = Math.round(52 + 28 * random() + (1 - f) * 24);
-      ctx.fillStyle = 'rgb(' + (shade - 9) + ',' + (shade + 6) + ',' + (shade - 7) + ')';
-      ctx.beginPath();
-      ctx.moveTo(48, y - 12);
-      for (let twig = 1; twig <= 9; twig++) {
-        const t = twig / 9;
-        ctx.lineTo(48 + sign * (t * width - 2), y - 9 + t * 14);
-        ctx.lineTo(48 + sign * t * width, y + 1 + t * 15 + random() * 5);
-      }
-      ctx.lineTo(48, y + 4);
-      ctx.fill();
-    }
-  }
-  const map = new THREE.CanvasTexture(canvas);
-  map.colorSpace = THREE.SRGBColorSpace;
-  const material = new THREE.MeshLambertMaterial({ map, alphaTest: 0.24, side: THREE.DoubleSide });
-  const positions = [],
-    uv = [],
-    indices = [];
-  for (const a of [0, Math.PI / 2]) {
-    const x = 2.45 * Math.cos(a),
-      z = 2.45 * Math.sin(a),
-      i = positions.length / 3;
-    positions.push(-x, 0, -z, x, 0, z, x, 8.2, z, -x, 8.2, -z);
-    uv.push(0, 0, 1, 0, 1, 1, 0, 1);
-    indices.push(i, i + 1, i + 2, i, i + 2, i + 3);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  geometry.setAttribute(
-    'normal',
-    new THREE.Float32BufferAttribute(Array.from({ length: 8 }, () => [0, 1, 0]).flat(), 3),
-  );
-  geometry.setIndex(indices);
-  return { geometry, material };
-}
-
 export class Treeline {
-  constructor(scene, world, surface) {
+  constructor(scene, world, surface, silhouette) {
     this.scene = scene;
     this.world = world;
     this.surface = surface;
-    this.cards = crownCards();
+    this.silhouette = silhouette;
     this.cells = new Map();
   }
 
@@ -70,7 +19,7 @@ export class Treeline {
     const grid = 25,
       world = this.world;
     const rng = randomFor(world.seed ^ Math.imul(cx, 776531) ^ Math.imul(cs, 379387));
-    const mesh = new THREE.InstancedMesh(this.cards.geometry, this.cards.material, grid * grid);
+    const mesh = new THREE.InstancedMesh(this.silhouette, coniferMaterial, grid * grid);
     let count = 0;
     for (let j = 0; j < grid; j++)
       for (let i = 0; i < grid; i++) {
@@ -100,10 +49,6 @@ export class Treeline {
       }
     mesh.count = count;
     mesh.receiveShadow = true;
-    if (close) {
-      mesh.geometry = conifer;
-      mesh.material = coniferMaterial;
-    }
     mesh.computeBoundingSphere();
     this.scene.add(mesh);
     return mesh;

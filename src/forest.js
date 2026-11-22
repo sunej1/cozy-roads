@@ -1,10 +1,10 @@
 import * as THREE from 'three/webgpu';
-import { cameraPosition, diffuseColor, normalViewGeometry, positionWorld, referenceAttribute, smoothstep, uniform, positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
+import { cameraPosition, dot, float, Fn, If, interleavedGradientNoise, screenCoordinate, normalViewGeometry, positionWorld, referenceAttribute, smoothstep, uniform, positionGeometry, positionLocal, time, vec3 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { randomFor } from './route.js';
 
 export const coniferMaterial = new THREE.MeshStandardNodeMaterial({
-  roughness: 0.93, vertexColors: true, alphaTest: 0.24, side: THREE.DoubleSide,
+  roughness: 0.93, alphaTest: 0.23, side: THREE.DoubleSide,
 });
 export const grassMaterial = new THREE.MeshStandardNodeMaterial({
   roughness: 0.95, vertexColors: true, alphaTest: 0.24, side: THREE.DoubleSide,
@@ -14,10 +14,6 @@ export const bladeMaterial = new THREE.MeshStandardNodeMaterial({
 });
 // Both sides of a foliage card represent the same outward-facing canopy.
 bladeMaterial.normalNode = grassMaterial.normalNode = coniferMaterial.normalNode = normalViewGeometry;
-// Transmitted skylight lifts thin leaves above the deep shadow between their roots.
-for (const material of [grassMaterial, bladeMaterial]) {
-  material.emissiveNode = diffuseColor.rgb.mul(0.34);
-}
 export const understoryMaterial = new THREE.MeshStandardNodeMaterial({
   roughness: 0.91, side: THREE.DoubleSide, vertexColors: true, emissive: '#283113', emissiveIntensity: 0.22,
 });
@@ -30,8 +26,26 @@ export const flowerMaterial = new THREE.MeshStandardNodeMaterial({
 });
 flowerMaterial.normalNode = aspenMaterial.normalNode = normalViewGeometry;
 
-for (const material of [coniferMaterial,aspenMaterial]) {
-  material.alphaTestNode = smoothstep(1.8,6.8,positionWorld.sub(cameraPosition).length()).oneMinus().mul(.80).add(material.alphaTest);
+export const driverEye = uniform(new THREE.Vector3());
+for (const material of [coniferMaterial, aspenMaterial]) {
+  // Thin only the foliage between the chase camera and the vehicle.
+  material.alphaTestNode = Fn(() => {
+    const threshold = float(material.alphaTest).toVar();
+    const relative = positionWorld.sub(cameraPosition);
+    If(dot(relative, relative).lessThan(121), () => {
+      const visible = smoothstep(0.48, 1.6, relative.length()).toVar();
+      const sight = driverEye.sub(cameraPosition);
+      const length2 = dot(sight, sight);
+      If(length2.lessThan(169), () => {
+        const t = dot(relative, sight).div(length2.max(0.01)).clamp(0, 1);
+        const radius = t.mul(0.6).add(0.53);
+        const clearance = relative.sub(sight.mul(t)).length();
+        visible.mulAssign(smoothstep(radius, radius.add(0.75), clearance));
+      });
+      If(visible.lessThanEqual(interleavedGradientNoise(screenCoordinate.xy)), () => threshold.assign(1));
+    });
+    return threshold;
+  })();
 }
 
 function windBend(height, amplitude) {
@@ -46,85 +60,19 @@ aspenMaterial.positionNode = windBend(6.6, 0.31);
 export const meadowCenter = uniform(new THREE.Vector2());
 export const meadowRange = uniform(new THREE.Vector2(24, 56));
 export const bladeRange = uniform(new THREE.Vector2(15, 31));
-const tuftRoot = referenceAttribute('instanceMatrix', 'mat4').element(3).xyz;
-for (const [material, range] of [[grassMaterial, meadowRange], [bladeMaterial, bladeRange], [flowerMaterial, meadowRange]]) {
-  const scale = smoothstep(range.x, range.y, tuftRoot.xz.sub(meadowCenter).length()).oneMinus();
-  material.positionNode = tuftRoot.add(windBend(0.5, 0.065).sub(tuftRoot).mul(scale));
+const tuftMatrix = referenceAttribute('instanceMatrix', 'mat4');
+const tuftRoot = tuftMatrix.element(3).xyz;
+export function applyMeadowWind(tracks) {
+  const up = tuftMatrix.element(1).xyz;
+  for (const [material, range] of [[grassMaterial, meadowRange], [bladeMaterial, bladeRange], [flowerMaterial, meadowRange]]) {
+    const scale = smoothstep(range.x, range.y, tuftRoot.xz.sub(meadowCenter).length()).oneMinus();
+    const tip = positionGeometry.y.max(0).mul(tracks.pressure(positionLocal.xz));
+    const pressed = windBend(0.5, 0.065).sub(up.mul(tip.mul(0.86))).add(vec3(tip.mul(0.22), 0, tip.mul(0.24)));
+    material.positionNode = tuftRoot.add(pressed.sub(tuftRoot).mul(scale));
+  }
 }
 
 understoryMaterial.positionNode = windBend(0.61, 0.12);
-
-function branchTree(detail, seed) {
-  const random = randomFor(seed);
-  const positions = [];
-  const normals = [];
-  const uv = [];
-  const colors = [];
-  const indices = [];
-  const height = 8.2;
-  const tint = new THREE.Color();
-
-  function vertex(x, y, z, nx, ny, nz, u, v, color) {
-    positions.push(x, y, z);
-    normals.push(nx, ny, nz);
-    uv.push(u, v);
-    colors.push(color.r, color.g, color.b);
-  }
-
-  tint.setRGB(0.89, 0.81, 0.73);
-  const barkSides = 7;
-  for (let ring = 0; ring <= 3; ring++) {
-    const y = height * ring / 3;
-    const width = 0.135 * (1 - ring / 3) + 0.022;
-    for (let side = 0; side <= barkSides; side++) {
-      const a = side / barkSides * Math.PI * 2;
-      vertex(Math.cos(a) * width, y, Math.sin(a) * width, Math.cos(a), 0, Math.sin(a),
-        0.80 + side / barkSides * 0.14, 0.12 + ring * 0.25, tint);
-      if (ring && side) {
-        const i = ring * (barkSides + 1) + side;
-        indices.push(i - barkSides - 2, i - 1, i, i - barkSides - 2, i, i - barkSides - 1);
-      }
-    }
-  }
-
-  for (let tier = 0; tier < detail; tier++) {
-    const fraction = tier / (detail - 1);
-    const y = 1.12 + 6.42 * fraction;
-    const reach = 2.43 * Math.pow(1 - fraction * 0.94, 0.91);
-    const arms = tier < detail * 0.7 ? 7 : 5;
-    for (let arm = 0; arm < arms; arm++) {
-      const angle = (arm / arms + tier * 0.093) * Math.PI * 2 + random() * 0.32;
-      const x = Math.cos(angle);
-      const z = Math.sin(angle);
-      const length = reach * (0.77 + random() * 0.42);
-      const width = length * (0.23 + random() * 0.15);
-      const tip = y + (0.12 + fraction * 0.65) * (0.3 + random()) - length * (0.15 + random() * 0.28);
-      const shade = 0.73 + fraction * 0.18 + random() * 0.11;
-      tint.setRGB(shade * 0.88, shade, shade * 0.85);
-      const i = positions.length / 3;
-
-      vertex(0, y, 0, x * 0.24, 0.96, z * 0.24, 0.365, 0.059, tint);
-      vertex(x * length * 0.43 - z * width, y + 0.14, z * length * 0.43 + x * width,
-        x * 0.26 - z * 0.25, 0.92, z * 0.26 + x * 0.25, 0.015, 0.43, tint);
-      vertex(x * length, tip, z * length, x * 0.52, 0.85, z * 0.52, 0.365, 0.985, tint);
-      vertex(x * length * 0.43 + z * width, y - 0.17, z * length * 0.43 - x * width,
-        x * 0.26 + z * 0.25, 0.92, z * 0.26 - x * 0.25, 0.72, 0.43, tint);
-      vertex(x * length * 0.50, y + 0.37, z * length * 0.50, x * 0.32, 0.94, z * 0.32, 0.365, 0.50, tint);
-      indices.push(i, i + 4, i + 1, i + 1, i + 4, i + 2, i + 2, i + 4, i + 3, i + 3, i + 4, i);
-    }
-  }
-
-  const shape = new THREE.BufferGeometry();
-  shape.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  shape.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  shape.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  shape.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  shape.setIndex(indices);
-  return shape;
-}
-
-export const conifer = branchTree(15, 3108);
-export const distantConifer = branchTree(6, 5219);
 
 export function aspen() {
   const random = randomFor(612);

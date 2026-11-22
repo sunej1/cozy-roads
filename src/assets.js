@@ -5,7 +5,8 @@ import meadowLeaves from '../assets/meadow-leaves.glb?url';
 import meadowFloor from '../assets/meadow-floor.webp';
 import floweringMeadow from '../assets/meadow-flowers.webp';
 import aspenSpray from '../assets/aspen-spray.webp';
-import firBough from '../assets/fir-bough.webp';
+import firMap from '../assets/fir-canopy.webp';
+import firModel from '../assets/fir-canopy.glb?url';
 import rockAndGravel from '../assets/rock-and-gravel.webp';
 import asphaltColor from '../assets/asphalt-color.jpg';
 import asphaltNormal from '../assets/asphalt-normal.jpg';
@@ -29,14 +30,39 @@ export async function loadLandscapeAssets() {
     return map;
   }
 
-  const [pavement, normal, rough, scans, elevations, clouds, clumps, turf, bough, blades, bedrock, blossoms, spray] = await Promise.all([
-    load(asphaltColor, true), load(asphaltNormal), load(asphaltRough),
-    new GLTFLoader().loadAsync(boulders), loadField(new URL('../assets/shuksan.u16', import.meta.url), Uint16Array),
+  const [
+    pavement,
+    normal,
+    rough,
+    scans,
+    elevations,
+    clouds,
+    clumps,
+    turf,
+    canopy,
+    fir,
+    blades,
+    bedrock,
+    blossoms,
+    spray,
+  ] = await Promise.all([
+    load(asphaltColor, true),
+    load(asphaltNormal),
+    load(asphaltRough),
+    new GLTFLoader().loadAsync(boulders),
+    loadField(new URL('../assets/shuksan.u16', import.meta.url), Uint16Array),
     loadField(new URL('../assets/cloud-field.bin', import.meta.url), Uint8Array, true),
-    load(meadowClumps, true), load(meadowFloor, true), load(firBough, true), new GLTFLoader().loadAsync(meadowLeaves), load(rockAndGravel), load(floweringMeadow, true), load(aspenSpray, true),
+    load(meadowClumps, true),
+    load(meadowFloor, true),
+    load(firMap, true),
+    new GLTFLoader().loadAsync(firModel),
+    new GLTFLoader().loadAsync(meadowLeaves),
+    load(rockAndGravel),
+    load(floweringMeadow, true),
+    load(aspenSpray, true),
   ]);
   const rocks = [];
-  scans.scene.traverse(object => {
+  scans.scene.traverse((object) => {
     if (!object.isMesh || ![0, 2, 5].includes(scans.scene.children.indexOf(object))) return;
     const geometry = object.geometry;
     geometry.computeBoundingBox();
@@ -51,5 +77,21 @@ export async function loadLandscapeAssets() {
     }
     rocks.push({ geometry, material: object.material });
   });
-  return { pavement, normal, rough, rocks, elevations, clouds, clumps, turf, bough, bedrock, blossoms, spray, leaves: blades.scene.getObjectByName('Meadow').geometry, middleLeaves: blades.scene.getObjectByName('MeadowMid').geometry };
+  return {
+    pavement,
+    normal,
+    rough,
+    rocks,
+    elevations,
+    clouds,
+    clumps,
+    turf,
+    canopy,
+    bedrock,
+    blossoms,
+    spray,
+    conifer: fir.scene.getObjectByName('Canopy').geometry,
+    distantConifer: fir.scene.getObjectByName('Silhouette').geometry,
+    leafLevels: ['Meadow', 'MeadowMid', 'MeadowFar'].map((name) => blades.scene.getObjectByName(name).geometry),
+  };
 }

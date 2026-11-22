@@ -24,7 +24,7 @@ export function mountainPage(world, column, page, divisions) {
   const positions = [],
     normals = [],
     relief = [],
-    roadOffset = [],
+    groundOffsets = [],
     lookup = new Map(),
     rows = new Map();
   const edge = bandColumns(band)
@@ -48,7 +48,7 @@ export function mountainPage(world, column, page, divisions) {
     const row = rowAt(start + v);
     const y = world.sampleTerrain(row, left + u);
     positions.push(row.x + left + u, y, -row.s);
-    roadOffset.push(left + u);
+    groundOffsets.push(left + u, Math.max(-128, world.shoreDistance(row, left + u)));
     normals.push(0, 1, 0);
     world.reliefCoordinates(row, left + u, relief, id * 4);
     return id;
@@ -143,7 +143,7 @@ export function mountainPage(world, column, page, divisions) {
     position: Float32Array.from(positions),
     normal: Float32Array.from(normals),
     relief: Float32Array.from(relief),
-    roadOffset: Float32Array.from(roadOffset),
+    groundOffsets: Float32Array.from(groundOffsets),
   };
 }
 
@@ -195,7 +195,7 @@ export class Horizon {
         keep.add(id);
         const divisions = !low && distance < (entry?.divisions === 64 ? 3600 : 3150) ? 64 : 32;
         if (!entry || (mask !== 255 && divisions !== entry.divisions)) {
-          if (!eager && built >= 2 && distance > 1750) {
+          if (!eager && built >= 2 && (entry || distance > 1750)) {
             this.pending = true;
             if (!entry) continue;
           } else {
@@ -208,7 +208,7 @@ export class Horizon {
             geometry.setAttribute('position', new THREE.BufferAttribute(data.position, 3));
             geometry.setAttribute('normal', new THREE.BufferAttribute(data.normal, 3));
             geometry.setAttribute('reliefField', new THREE.BufferAttribute(data.relief, 4));
-            geometry.setAttribute('roadOffset', new THREE.BufferAttribute(data.roadOffset, 1));
+            geometry.setAttribute('groundOffsets', new THREE.BufferAttribute(data.groundOffsets, 2));
             const capacity = data.lod.reduce((sum, levels) => sum + Math.max(...levels.map((l) => l.length)), 0);
             geometry.setIndex(
               new THREE.BufferAttribute(new Uint16Array(capacity), 1).setUsage(THREE.DynamicDrawUsage),

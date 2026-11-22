@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import {
+  Break,
   cameraPosition,
   color,
   dot,
@@ -19,6 +20,7 @@ import { CLOUD_WIDTH, CLOUD_LAYERS, CLOUD_BOTTOM, CLOUD_TOP, CLOUD_SCALE_X, CLOU
 
 export function cloudLayer(sky, sun, field) {
   const length = CLOUD_WIDTH * CLOUD_WIDTH * CLOUD_LAYERS * 2;
+  if (field.length !== length + CLOUD_WIDTH ** 2) throw new Error('Incomplete cloud density and shadow field');
   const noise = new THREE.Data3DTexture(field.subarray(0, length), CLOUD_WIDTH, CLOUD_LAYERS, CLOUD_WIDTH);
   noise.format = THREE.RGFormat;
   noise.minFilter = noise.magFilter = THREE.LinearFilter;
@@ -59,6 +61,7 @@ export function cloudLayer(sky, sun, field) {
         const source = mix(color('#879ab3'), vec3(1.26, 1.2, 1.09), direct).add(silver.mul(direct));
         light.addAssign(source.mul(opacity).mul(transmission));
         transmission.mulAssign(opacity.oneMinus());
+        If(transmission.lessThan(0.009), () => Break());
         p.addAssign(direction.mul(step));
       });
       result.assign(mix(base, base.mul(transmission).add(light), smoothstep(0.022, 0.13, direction.y).mul(0.9)));

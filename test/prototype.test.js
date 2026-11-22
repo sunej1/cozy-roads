@@ -222,3 +222,148 @@ test('every garage model ships with four wheel pivots on the correct axles and b
     assert.ok(json.materials.some(m => ['RearLamps', 'Light_Red'].includes(m.name) && m.emissiveFactor[0] > 0), name);
   }
 });
+
+test('meadow and fir detail levels progressively simplify the same vegetation', () => {
+  for (const [file, names] of [
+    ['meadow-leaves', ['Meadow', 'MeadowMid', 'MeadowFar']],
+    ['fir-canopy', ['Canopy', 'Silhouette']],
+  ]) {
+    const bytes = readFileSync(new URL('../assets/' + file + '.glb', import.meta.url));
+    const model = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+    let previous = Infinity;
+    for (const name of names) {
+      const mesh = model.meshes[model.nodes.find(node => node.name === name).mesh].primitives[0];
+      const indices = model.accessors[mesh.indices].count;
+      const bounds = model.accessors[mesh.attributes.POSITION];
+      assert.ok(indices > 0 && indices % 3 === 0 && indices < previous, name);
+      assert.ok(bounds.min[1] <= 0.4 && bounds.max[1] > 0.18);
+      previous = indices;
+    }
+  }
+});
+
+test('cloud density, lighting and projected shadows ship together', async () => {
+  const { gunzipSync } = await import('node:zlib');
+  const { CLOUD_WIDTH, CLOUD_LAYERS } = await import('../src/cloud-field.js');
+  const field = gunzipSync(readFileSync(new URL('../assets/cloud-field.bin', import.meta.url)));
+  const plane = CLOUD_WIDTH ** 2;
+  assert.equal(field.length, plane * (2 * CLOUD_LAYERS + 1));
+  const shade = field.subarray(-plane);
+  assert.ok(shade.some(x => x < 90) && shade.some(x => x === 255));
+});
+
+test('tire marks follow separate wheel paths, survive field shifts, recover and clear on restart', async () => {
+  const { Object3D } = await import('three/webgpu');
+  const { GrassTracks } = await import('../src/grass-tracks.js');
+  const tracks = new GrassTracks(), root = new Object3D();
+  const tires = [-0.8, 0.8].map(x => {
+    const pivot = new Object3D();
+    pivot.position.x = x;
+    return { pivot };
+  });
+  const value = (x, z) => {
+    const { width, height, data } = tracks.map.image;
+    const spacing = 0.20;
+    const i = Math.floor((x - tracks.origin.value.x) / spacing);
+    const j = Math.floor((z - tracks.origin.value.y) / spacing);
+    return i >= 0 && i < width && j >= 0 && j < height ? data[j * width + i] : 0;
+  };
+  tracks.update(1, root, tires, false);
+  assert.equal(tracks.active.value, 0);
+  for (let i = 0; i <= 7; i++) {
+    root.position.z = -i;
+    tracks.update(1 + i / 10, root, tires, true);
+  }
+  assert.ok(value(-0.8, -2) > 170 && value(0.8, -2) > 170);
+  assert.equal(value(0, -2), 0);
+  tracks.update(8, root, tires, false);
+  assert.ok(value(0.8, -2) > 0 && value(0.8, -2) < 130);
+  tracks.update(13, root, tires, false);
+  assert.equal(value(0.8, -2), 0);
+  root.position.x = -100;
+  tracks.update(14, root, tires, true);
+  assert.ok(value(-100.8, -7) > 160);
+  tracks.clear();
+  assert.equal(tracks.active.value, 0);
+  assert.ok(tracks.data.every(x => x === 0));
+});
+
+test('canopy shade follows planted trees across chunk and field boundaries', async () => {
+  const { canopyShade } = await import('../src/canopy-shade.js');
+  const { Matrix4 } = await import('three/webgpu');
+  const canopy = canopyShade();
+  let map;
+  canopy.ambient.traverse(node => { if (node.isTextureNode) map = node.value; });
+  const tree = new Matrix4().makeTranslation(7.5, 0, -129);
+  const stand = { count: 1, instanceMatrix: { array: tree.elements } };
+  const chunks = new Map([['1:0', { id: 1, trees: stand, aspens: { count: 0, instanceMatrix: { array: [] } } }]]);
+  for (const x of [0, 32]) {
+    canopy.update({ x, s: 128 }, chunks, 1);
+    const { data, width } = map.image;
+    const u = Math.floor((7.5 - x) / 1.25 + width / 2);
+    const v = Math.floor(-1 / 1.25 + width / 2);
+    assert.ok(data[v * width + u] > 120);
+    assert.equal(data[v * width + u + 6], 0);
+    const version = map.version;
+    canopy.update({ x, s: 128 }, chunks, 1);
+    assert.equal(map.version, version);
+  }
+  canopy.update({ x: 32, s: 128 }, new Map(), 2);
+  assert.ok(map.image.data.every(x => x === 0));
+});
+
+test('the shadow behind an isolated ridge follows the sun from either side of the route', async () => {
+  const { mountainLight } = await import('../src/mountain-light.js');
+  const { DataUtils } = await import('three/webgpu');
+  const world = {
+    section: s => ({ x: 0, s }),
+    sampleTerrain: (row, x) => Math.abs(x + 168) < 1 && Math.abs(row.s - 24) < 1 ? 1300 : 0,
+  };
+  for (const direction of [-1, 1]) {
+    const light = mountainLight(world, { x: -1, y: 0.5, z: direction });
+    light.update({ x: 0, s: 0 }, true);
+    let map;
+    light.visibility.traverse(node => { if (node.isTextureNode) map = node.value; });
+    const { data, width } = map.image;
+    const height = (x, s) => DataUtils.fromHalfFloat(data[Math.floor(s / 48 + width / 2) * width + Math.floor(x / 48 + width / 2)]);
+    assert.ok(height(24, 24 + direction * 192) > 1000);
+    assert.ok(height(24, 24 - direction * 192) < 1);
+  }
+});
+
+test('driving tiles and mountain pages carry finite signed distances to the road and lake shore', () => {
+  const world = createWorld(DEFAULT_SEED);
+  for (const mesh of [buildTerrain(world, 0), mountainPage(world, 0, 0, 32)]) {
+    assert.equal(mesh.groundOffsets.length * 3, mesh.position.length * 2);
+    let wet = 0, dry = 0;
+    for (let i = 0; i < mesh.groundOffsets.length / 2; i++) {
+      const row = world.section(-mesh.position[i * 3 + 2]);
+      const offset = mesh.groundOffsets[i * 2], shore = mesh.groundOffsets[i * 2 + 1];
+      assert.ok(Math.abs(row.x + offset - mesh.position[i * 3]) < 0.001);
+      assert.ok(Math.abs(shore - Math.max(-128, world.shoreDistance(row, offset))) < 0.001);
+      if (shore > 0) wet++;
+      if (shore < -8) dry++;
+    }
+    assert.ok(wet > 0 && dry > 0);
+  }
+});
+
+test('quality changes keep the meadow visible while cell densities are replaced', async () => {
+  const { Scene } = await import('three/webgpu');
+  const { Meadow } = await import('../src/meadow.js');
+  const meadow = new Meadow(new Scene(), { seed: 17, centerX: () => -1000 }, () => 40);
+  const car = { x: 0, s: 0 };
+  meadow.update(car, false, true);
+  const sample = () => {
+    for (let s = -2; s <= 1; s++) {
+      for (let x = -2; x <= 1; x++) assert.ok(meadow.cells.get(x + ',' + s)?.mesh.count > 0);
+    }
+  };
+  for (const low of [true, false]) {
+    meadow.update(car, low);
+    sample();
+    assert.ok([...meadow.cells.values()].some(cell => cell.low !== low));
+    while (meadow.pending.length) { meadow.update(car, low); sample(); }
+    assert.ok([...meadow.cells.values()].every(cell => cell.low === low));
+  }
+});

@@ -3,6 +3,7 @@ import { grassMaterial, grassTuft, meadowFlowers, flowerMaterial, bladeMaterial,
 import { noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 
 const CELL = 16;
+export const MEADOW_DETAIL_LAYER = 1;
 const patch = grassTuft();
 const rosette = meadowFlowers();
 const tuft = new THREE.Object3D();
@@ -12,12 +13,12 @@ const dry = new THREE.Color('#ffe1aa');
 
 // A cell owns its samples in world space, so turning around reproduces each blade.
 export class Meadow {
-  constructor(scene, world, height, leaves, middleLeaves) {
+  constructor(scene, world, height, leafLevels = [], cameraPosition) {
     this.scene = scene;
     this.world = world;
     this.height = height;
-    this.leaves = leaves;
-    this.middleLeaves = middleLeaves;
+    this.leafLevels = leafLevels;
+    this.cameraPosition = cameraPosition;
     this.cells = new Map();
   }
 
@@ -36,6 +37,10 @@ export class Meadow {
       if (verge < 0.48) continue;
       const y = this.height(s, x);
       if (y < 0.2 || y > 220) continue;
+      if (y < 5) {
+        const row = this.world.section(s);
+        if (this.world.shoreDistance(row, x - row.x) > -3 - 2 * noise(x / 8, s / 8)) continue;
+      }
       const dx = this.height(s, x + 0.8) - y,
         ds = this.height(s + 0.8, x) - y;
       const grade = Math.hypot(dx, ds) / 0.8;
@@ -90,24 +95,15 @@ export class Meadow {
       this.low = low;
       this.pending = [];
       for (const [key, cell] of this.cells) {
-        if (cell.low === low && Math.hypot(cell.cx - cx, cell.cs - cs) <= radius + 0.6) continue;
-        this.scene.remove(cell.mesh);
-        cell.mesh.dispose();
-        if (cell.flowers) {
-          this.scene.remove(cell.flowers);
-          cell.flowers.dispose();
-        }
-        for (const group of cell.blades ?? []) {
-          this.scene.remove(group);
-          group.dispose();
-        }
+        if (Math.hypot(cell.cx - cx, cell.cs - cs) <= radius + 0.6) continue;
+        this.remove(cell);
         this.cells.delete(key);
       }
       for (let x = cx - radius; x <= cx + radius; x++) {
         for (let s = cs - radius; s <= cs + radius; s++) {
           const key = x + ',' + s;
           const distance = Math.hypot(x - cx, s - cs);
-          if (distance <= radius + 0.6 && !this.cells.has(key)) this.pending.push({ key, x, s, distance });
+          if (distance <= radius + 0.6 && this.cells.get(key)?.low !== low) this.pending.push({ key, x, s, distance });
         }
       }
       this.pending.sort((a, b) => b.distance - a.distance);
@@ -116,9 +112,13 @@ export class Meadow {
     const budget = eager ? this.pending.length : 2;
     for (let i = 0; i < budget && this.pending.length; i++) {
       const { key, x, s } = this.pending.pop();
+      const previous = this.cells.get(key);
       this.cells.set(key, this.plant(x, s, low));
+      if (previous) this.remove(previous);
     }
     const reach = meadowRange.value.y;
+    const leafDistance2 = (bladeRange.value.y + 4) ** 2;
+    const near2 = (low ? 6 : 11) ** 2, middle2 = (low ? 13 : 20) ** 2;
     for (const cell of this.cells.values()) {
       const { mesh, cx: x, cs: s } = cell;
       const dx = Math.max(x * CELL - car.x, car.x - (x + 1) * CELL, 0);
@@ -126,20 +126,36 @@ export class Meadow {
       const d2 = dx * dx + ds * ds;
       mesh.visible = d2 < reach * reach;
       if (cell.flowers) cell.flowers.visible = mesh.visible;
-      if (!cell.blades && this.leaves && d2 < (bladeRange.value.y + 8) ** 2) {
+      if (!cell.blades && this.leafLevels.length && d2 < (bladeRange.value.y + 8) ** 2) {
         cell.blades = this.leafGroups(cell);
       }
       for (const group of cell.blades ?? []) {
-        const distance = Math.hypot(car.x - group.boundingSphere.center.x, car.s + group.boundingSphere.center.z);
-        group.visible = distance < bladeRange.value.y + 4;
-        group.geometry = distance < (low ? 9 : 18) ? this.leaves : this.middleLeaves;
+        const center = group.boundingSphere.center;
+        const distance2 = (car.x - center.x) ** 2 + (car.s + center.z) ** 2;
+        group.visible = distance2 < leafDistance2;
+        if (group.visible) {
+          const eye2 = (this.cameraPosition.x - center.x) ** 2 + (this.cameraPosition.z - center.z) ** 2;
+          group.geometry = this.leafLevels[eye2 < near2 ? 0 : eye2 < middle2 ? 1 : 2];
+        }
       }
     }
   }
 
+  remove(cell) {
+    this.scene.remove(cell.mesh);
+    cell.mesh.dispose();
+    if (cell.flowers) {
+      this.scene.remove(cell.flowers);
+      cell.flowers.dispose();
+    }
+    for (const group of cell.blades ?? []) {
+      this.scene.remove(group);
+      group.dispose();
+    }
+  }
+
   leafGroups({ mesh, cx, cs }) {
-    // A tuft has thousands of vertices. Cull it in four-metre blocks in each
-    // camera, including the lake reflection, without changing its placement.
+    // Cull the detailed leaves in four-metre blocks along the view frustum.
     const buckets = Array.from({ length: 16 }, () => []);
     for (let i = 0; i < mesh.count; i++) {
       mesh.getMatrixAt(i, tuft.matrix);
@@ -148,13 +164,14 @@ export class Meadow {
       buckets[s * 4 + x].push(i);
     }
     return buckets.filter(indices => indices.length).map(indices => {
-      const group = new THREE.InstancedMesh(this.leaves, bladeMaterial, indices.length);
+      const group = new THREE.InstancedMesh(this.leafLevels[0], bladeMaterial, indices.length);
       for (const [i, source] of indices.entries()) {
         mesh.getMatrixAt(source, tuft.matrix);
         mesh.getColorAt(source, tint);
         group.setMatrixAt(i, tuft.matrix);
         group.setColorAt(i, tint);
       }
+      group.layers.set(MEADOW_DETAIL_LAYER);
       group.computeBoundingSphere();
       group.receiveShadow = true;
       this.scene.add(group);

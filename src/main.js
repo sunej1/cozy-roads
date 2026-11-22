@@ -2,10 +2,11 @@ import * as THREE from 'three/webgpu';
 import './style.css';
 import { loadLandscapeAssets } from './assets.js';
 import { loadVehicles } from './car.js';
+import { driverEye } from './forest.js';
 import { WorldView } from './world-view.js';
 import { createWorld, parseSeed } from './world.js';
 import { makeCinematic } from './cinematic.js';
-import { BENCHMARK_SECONDS, clamp, drive, joinRoad, mix, newCarState, surfaceAt, TOUR_SPEED } from './route.js';
+import { ROAD_EDGE, BENCHMARK_SECONDS, clamp, drive, joinRoad, mix, newCarState, surfaceAt, TOUR_SPEED } from './route.js';
 import { VEHICLES, vehicleId } from './vehicles.js';
 import { RecentFrames, ResolutionBudget, summarize } from './timing.js';
 
@@ -106,6 +107,7 @@ function setMode(next) {
 function startDrive(useAuto, restart = false) {
   if (restart || mode !== 'paused') {
     car = newCarState(world);
+    landscape.tracks.clear();
     wheelTurn = 0;
   }
   if (useAuto) joinRoad(car, world);
@@ -171,6 +173,8 @@ function poseScene(blend) {
   const roll = clamp(Math.atan2(rightY - leftY, halfWidth * 2), -0.61, 0.61);
   const bodyLean = car.steering * clamp(Math.abs(car.speed) / 26, 0, 1) * (0.14 - vehicle.suspension * 0.09);
   model.root.position.set(x, mix(y, (frontY + rearY + leftY + rightY) * 0.25, 0.68), -s);
+  driverEye.value.copy(model.root.position);
+  driverEye.value.y += 0.88;
   model.brake(mode === 'driving' && input.brake && car.speed >= 0);
   model.root.rotation.set(pitch, -heading, roll + bodyLean);
   for (const { pivot, wheel, front } of model.tires) {
@@ -231,9 +235,8 @@ function applyQuality() {
     applyRenderScale();
   }
   landscape.setQuality(low);
-  renderer.shadowMap.enabled = !low;
   resize();
-  landscape.update(car, low, true);
+  landscape.update(car, low, !isMoving());
   resetTime();
 }
 
@@ -330,6 +333,7 @@ function startBenchmark() {
     resolutionBudget.reset();
     applyRenderScale();
   }
+  landscape.tracks.clear();
   car = { ...newCarState(world), speed: TOUR_SPEED };
   wheelTurn = 0;
   automatic = true;
@@ -432,6 +436,8 @@ function frame(now) {
 
   if (isMoving() || needsRender) {
     poseScene(1 - Math.exp(-11 * Math.min(delta / 1000, 0.13)));
+    const onGrass = Math.abs(model.root.position.x - world.centerX(-model.root.position.z)) > ROAD_EDGE - 1.1;
+    landscape.tracks.update(now / 1000, model.root, model.tires, onGrass);
     landscape.animate(now / 1000, camera, car);
     if (useCinematic) {
       if (isMoving() && resolutionBudget.observe(delta)) applyRenderScale();
@@ -524,7 +530,8 @@ async function initialize() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#aec5c6');
   camera = new THREE.PerspectiveCamera(59, 1, 0.25, 9800);
-  landscape = new WorldView(scene, assets, world);
+  renderer.shadowMap.enabled = true;
+  landscape = new WorldView(scene, assets, world, camera);
   ui.seed.textContent = 'World seed ' + world.seed;
   chooseVehicle(selectedVehicle, false);
   applyQuality();

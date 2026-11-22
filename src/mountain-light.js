@@ -11,13 +11,15 @@ export function mountainLight(world, sun) {
   const map = new THREE.DataTexture(data, SIZE, SIZE, THREE.RedFormat, THREE.HalfFloatType);
   map.minFilter = map.magFilter = THREE.LinearFilter;
   const origin = uniform(new THREE.Vector2());
-  const uv = vec2(positionWorld.x, positionWorld.z.negate())
-    .sub(origin)
-    .div(SIZE * STEP);
-  const blocker = texture(map, uv).r;
-  const border = uv.min(uv.oneMinus());
-  const interior = border.x.min(border.y);
-  const visibility = mix(1, smoothstep(-8, 24, positionWorld.y.sub(blocker)), smoothstep(0.025, 0.09, interior));
+  function visibilityAt(point) {
+    const uv = vec2(point.x, point.z.negate())
+      .sub(origin)
+      .div(SIZE * STEP);
+    const blocker = texture(map, uv).r;
+    const border = uv.min(uv.oneMinus());
+    const interior = border.x.min(border.y);
+    return mix(1, smoothstep(-8, 24, point.y.sub(blocker)), smoothstep(0.025, 0.09, interior));
+  }
   let activeX, activeS, pending;
   const back = new Uint16Array(SIZE * SIZE);
   function update(car, eager = false) {
@@ -63,5 +65,5 @@ export function mountainLight(world, sun) {
     pending = null;
     map.needsUpdate = true;
   }
-  return { visibility, update };
+  return { visibility: visibilityAt(positionWorld), visibilityAt, update };
 }

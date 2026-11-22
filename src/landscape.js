@@ -11,7 +11,7 @@ import { SUN_DIRECTION } from './cloud-field.js';
 
 export const SUN = new THREE.Vector3(...SUN_DIRECTION).normalize();
 
-export function atmosphere(scene) {
+export function atmosphere(scene, visibilityAt) {
   const far = uniform(7600);
   const ray = positionWorld.sub(cameraPosition);
   const distance = ray.length();
@@ -26,7 +26,10 @@ export function atmosphere(scene) {
   const cover = smoothstep(far.mul(0.78), far, distance);
   const glow = dot(ray.normalize(), vec3(SUN.x, SUN.y, SUN.z)).max(0).pow(7);
   const highAir = mix(color('#6687ac'), color('#b6cbd6'), smoothstep(800, 7400, distance));
-  const haze = mix(highAir, color('#f1d6ad'), glow.mul(0.74));
+  // Sample the air between the driver and the ridge so mist also catches sunlight.
+  const litAir = visibilityAt(cameraPosition.add(ray.mul(0.6)));
+  const valley = mix(color('#64819d'), color('#eacfa6'), litAir.mul(glow.mul(0.36).add(0.56)));
+  const haze = mix(mix(highAir, color('#f1d6ad'), glow.mul(0.74)), valley, lowAir.mul(0.80));
   scene.fogNode = fog(haze, aerial.max(cover));
   return far;
 }
@@ -97,12 +100,13 @@ export function makeWater(sunVisibility) {
   const p = positionWorld.xz;
   const view = cameraPosition.sub(positionWorld).normalize();
   const distance = cameraPosition.sub(positionWorld).length();
-  const wave1 = dot(p, vec2(0.49, 0.82)).add(clock.mul(1.1));
-  const wave2 = dot(p, vec2(-1.38, 0.65)).sub(clock.mul(1.73));
   const wind = dot(p, vec2(0.034, 0.073)).sub(clock.mul(0.16)).sin();
+  const crosswind = dot(p, vec2(-0.093, 0.041)).add(clock.mul(0.21)).sin();
+  const wave1 = dot(p, vec2(0.49, 0.82)).add(clock.mul(1.1), crosswind.mul(2.7));
+  const wave2 = dot(p, vec2(-1.38, 0.65)).sub(clock.mul(1.73)).add(wind.mul(1.9));
   const wave3 = dot(p, vec2(2.11, -1.72)).add(clock.mul(2.41)).add(wind.mul(4.1));
   const wave4 = dot(p, vec2(4.42, 1.65)).add(clock.mul(3.1)).add(wind.mul(2.6));
-  const wave5 = dot(p, vec2(-0.15, 0.48)).sub(clock.mul(0.82));
+  const wave5 = dot(p, vec2(-0.15, 0.48)).sub(clock.mul(0.82)).add(crosswind.mul(2.2));
   const waveFalloff = smoothstep(28, 390, distance).oneMinus();
   const ripple = vec2(wave1.cos().mul(0.026).add(wave2.sin().mul(0.024), wave4.sin().mul(0.022), wave5.sin().mul(0.017)),
     wave2.cos().mul(0.027).add(wave3.sin().mul(0.025), wave4.cos().mul(0.026), wave5.cos().mul(0.020)))
@@ -112,7 +116,7 @@ export function makeWater(sunVisibility) {
   const bank = attribute('shore', 'float');
   const shallows = smoothstep(1.2, 21, bank).oneMinus().mul(smoothstep(-2, 1, bank));
   const bankRipples = wave3.add(wave2.sin().mul(0.52)).sin().mul(0.5).add(0.5);
-  const shoal = mix(color('#468c86'), color('#9bc5a8'), bankRipples.mul(0.37));
+  const shoal = mix(color('#506f62'), color('#96a782'), bankRipples.mul(0.37));
   const lakeColor = mix(color('#153d49'), shoal, shallows.mul(0.90));
   const surfaceScatter = wave1.sin().mul(0.56).add(wave2.sin().mul(0.23)).mul(waveFalloff).mul(0.025);
   const sunlight = vec3(SUN.x, SUN.y, SUN.z);
@@ -120,7 +124,10 @@ export function makeWater(sunVisibility) {
   const skyTint = mix(color('#759fae'), color('#e5cbb0'), dot(view.negate(), sunlight).max(0).pow(6));
   const distortion = vec2(ripple.x, ripple.y).mul(0.135).mul(smoothstep(0, 6, bank));
   const reflected = planar.sample(screenUV.flipX().add(distortion).clamp(0.004, 0.996)).rgb;
-  const path = reflected.mul(color('#d7eeee')).add(skyTint.mul(0.075));
+  // At a grazing angle one reflection texel can straddle the far bank and the sky.
+  // Blend through the shallow lakebed across that footprint.
+  const shoreline = smoothstep(1, bank.fwidth().mul(2).add(10), bank);
+  const path = mix(shoal, reflected, shoreline).mul(color('#d7eeee')).add(skyTint.mul(0.075));
   const waveFront = bank.mul(3.5).add(wave1.sin().mul(0.69)).sub(clock.mul(2.7)).cos().max(0).pow(9);
   const foamEdge = smoothstep(1.1, 3.5, bank).oneMinus().mul(smoothstep(0, 0.5, bank)).mul(waveFront).mul(0.30);
 
@@ -131,7 +138,7 @@ export function makeWater(sunVisibility) {
       .add(surfaceScatter).add(color('#ffce92').mul(glint).mul(1.28)).add(color('#b9afa0').mul(foamEdge));
   }
 
-  return { anchor, clock, material, lowMaterial };
+  return { anchor, clock, material, lowMaterial, reflector: planar.reflector };
 }
 
 // Four seamless, band-limited noise fields. Hardware mipmaps filter the grain
@@ -219,23 +226,29 @@ function surveyDetail(map) {
   return mix(residual(uv), residual(rotated), basis.z).mul(basis.w, 0.67).toVar();
 }
 
-export function makeTerrainMaterial(reliefMap, turf, bedrock, low = false) {
+function triplanar(p, weights, map) {
+  return texture(map, p.zy).mul(weights.x)
+    .add(texture(map, p.xz).mul(weights.y), texture(map, p.xy).mul(weights.z)).toVar();
+}
+
+export function makeBoulderMaterial(bedrock) {
+  const material = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.89 });
+  const axes = normalWorldGeometry.abs().pow(3);
+  const weights = axes.div(axes.x.add(axes.y, axes.z));
+  const face = triplanar(positionWorld.mul(0.57), weights, bedrock);
+  material.colorNode = mix(color('#958e82'), color('#f1efe1'), face.r)
+    .mul(face.g.mul(0.73).add(0.61));
+  return material;
+}
+
+export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = false) {
   const material = new THREE.MeshStandardNodeMaterial();
   const p = positionWorld,
     nWorld = normalWorldGeometry.normalize();
   const axes = nWorld.abs().pow(4);
   const weights = axes.div(axes.x.add(axes.y, axes.z)).toVar();
-  function triplanar(scale, map = mineralNoise) {
-    return texture(map, p.zy.mul(scale))
-      .mul(weights.x)
-      .add(
-        texture(map, p.xz.mul(scale)).mul(weights.y),
-        texture(map, p.xy.mul(scale)).mul(weights.z),
-      )
-      .toVar();
-  }
-  const field = triplanar(0.0062),
-    grain = triplanar(0.148);
+  const field = triplanar(p.mul(0.0062), weights, mineralNoise),
+    grain = triplanar(p.mul(0.148), weights, mineralNoise);
   const zoom = p.sub(cameraPosition).length();
   const macro = texture(mineralNoise, vec2(p.x.add(p.z.mul(0.34)), p.z.sub(p.x.mul(0.26))).mul(0.00074)).toVar();
   const meadowTint = mix(
@@ -244,10 +257,12 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, low = false) {
     field.r.mul(0.52).add(field.g.mul(0.36), field.b.mul(0.12)),
   );
   const sod = texture(turf, p.xz.mul(0.42).add(field.rg.mul(0.18))).rgb.toVar();
-  const meadow = meadowTint.mul(sod.mul(3.3).add(0.30));
+  // Pressed grass exposes the darker ground between stems at the tire contacts.
+  const laid = tracks.pressure(p.xz);
+  const meadow = meadowTint.mul(sod.mul(3.3).add(0.30), laid.mul(-0.28).add(1));
   const residual = surveyDetail(reliefMap);
   const aspect = dot(nWorld, vec3(0.74, 0, -0.42));
-  const outcrop = triplanar(0.057, bedrock);
+  const outcrop = triplanar(p.mul(0.057), weights, bedrock);
   const strata = mix(color('#555c63'), color('#aca898'), field.r.mul(0.56).add(macro.g.mul(0.44)));
   const stone = strata.mul(outcrop.r.mul(0.96).add(outcrop.g.mul(0.18), 0.43));
   const high = p.y.add(macro.r.sub(0.5).mul(110));
@@ -266,14 +281,19 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, low = false) {
   const canopy = mix(color('#273e38'), color('#566449'), field.b.mul(0.6).add(grain.g.mul(0.4)));
   const drifts = mix(color('#b1c3cf'), color('#faf8ef'), field.g.mul(0.38).add(0.46));
   const coarse = mix(mix(mix(meadow, canopy, forest), stone, exposed), drifts, snow);
-  const roadside = attribute('roadOffset', 'float').abs();
+  const offsets = attribute('groundOffsets', 'vec2');
+  const roadside = offsets.x.abs();
   const gravel = texture(bedrock, p.xz.mul(0.64)).b;
   const shoulder = smoothstep(ROAD_EDGE + 0.26, ROAD_EDGE + 1.24, roadside
     .add(gravel.sub(0.5).mul(0.52), field.g.sub(0.5).mul(0.88))).oneMinus()
     .mul(smoothstep(140, 240, zoom).oneMinus());
   const aggregate = mix(color('#53524b'), color('#a69c82'), gravel);
-  material.colorNode = mix(coarse, aggregate, shoulder).mul(grain.a.mul(0.14).add(grain.b.mul(0.12), 0.87));
-  material.roughnessNode = mix(0.94, 0.66, snow);
+  const strand = smoothstep(-8.0, -2.4, offsets.y.add(field.b.sub(0.5).mul(4.6)))
+    .mul(smoothstep(1.8, 5.2, p.y).oneMinus());
+  const wet = smoothstep(-3.8, 0.0, offsets.y);
+  const pebbles = mix(color('#655e4d'), color('#b4a58a'), gravel).mul(wet.mul(-0.44).add(1));
+  material.colorNode = mix(mix(coarse, pebbles, strand), aggregate, shoulder).mul(grain.a.mul(0.14).add(grain.b.mul(0.12), 0.87));
+  material.roughnessNode = mix(mix(0.94, 0.47, strand.mul(wet)), 0.66, snow);
   if (low) return material;
   const near = smoothstep(60, 390, zoom).oneMinus();
   const crag = outcrop.g.mul(1.12).add(field.g.mul(0.36), grain.g.mul(near).mul(0.08));

@@ -77,13 +77,15 @@ function sample(x, y, z, channel) {
 
 function density(x, h, z) {
   if (h <= bottom || h >= top) return 0;
-  const y = h * 0.00023;
-  const profile = smooth(bottom, bottom + 130, h) * (1 - smooth(top - 330, top, h));
-  const broad = 0.84 * sample(x, y, z, 0) + 0.26 * sample(x, y, z, 1);
-  const detail =
-    0.18 * sample(x * 3 + 0.37, y * 3 + 0.37, z * 3 + 0.37, 1) +
-    0.065 * sample(x * 11 - 0.21, y * 11 - 0.21, z * 11 - 0.21, 1);
-  return Math.max(0, broad + detail + profile * 0.28 - 0.8) * 3.4;
+  const t = (h - bottom) / (top - bottom);
+  const weather = sample(x, 0.42, z, 0);
+  const ceiling = 0.47 + 0.51 * weather;
+  const lift = smooth(0, 0.17, t) * (1 - smooth(ceiling - 0.23, ceiling + 0.12, t));
+  const y = t * 0.48 + 0.19;
+  const core = 0.84 * sample(x, y, z, 0) + 0.28 * sample(x * 2, y, z * 2, 1);
+  const billows = 0.21 * sample(x * 4 + 0.37, y * 1.9, z * 4 + 0.37, 1)
+    + 0.075 * sample(x * 11 - 0.21, y * 3, z * 11 - 0.21, 1);
+  return Math.max(0, core + billows + 0.23 * weather - 0.79) * 4.7 * lift;
 }
 const [sunX, sunY, sunZ] = SUN_DIRECTION.map((v) => v / Math.hypot(...SUN_DIRECTION));
 const data = new Uint8Array(width * layers * width * 2);
@@ -96,7 +98,8 @@ for (let z = 0; z < width; z++)
       const ahead = (d) => density(px + d * sunX * CLOUD_SCALE_X, h + d * sunY, pz + d * sunZ * CLOUD_SCALE_Z);
       const offset = ((z * layers + y) * width + x) * 2;
       data[offset] = Math.round(Math.min(1, density(px, h, pz) / 2) * 255);
-      data[offset + 1] = Math.round((0.28 + 0.72 * Math.exp(-2.7 * (0.95 * ahead(135) + 0.68 * ahead(370)))) * 255);
+      const optical = ahead(65) + ahead(190) + ahead(355) + ahead(565) + ahead(830);
+      data[offset + 1] = Math.round((0.16 + 0.84 * Math.exp(-optical * 1.48)) * 255);
     }
 // Integrate sunlight once per ground column. Receivers then project onto this
 // plane with parallax at their own elevation, including the reflective lake.

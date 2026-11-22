@@ -33,7 +33,7 @@ The measurements are elapsed time between browser animation callbacks. They incl
 
 | Preset | Rendering |
 | --- | --- |
-| Standard | Surveyed mountain relief, slope-dependent snow, distant forest stands, volumetric clouds, terrain and cloud shadows, wind-animated grass and trees, and planar lake reflections. |
+| Standard | Surveyed mountain relief, slope-dependent snow, distant forest stands, volumetric clouds, terrain and cloud shadows, layered meadow grass that bends under the tires, wind-animated trees, and planar lake reflections. |
 | Cinematic | Screen-space diffuse bounce and ambient occlusion, ray-marched sunbeams, and HDR bloom in addition to Standard. Begins rendering at full resolution, can reduce each internal dimension to 90% under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
 | Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler terrain, water, and lighting. |
 

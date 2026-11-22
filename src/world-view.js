@@ -1,22 +1,23 @@
-import { shadow } from 'three/tsl';
+import { cameraPosition, diffuseColor, dot, luminance, mix as mixColor, positionWorld, shadow, smoothstep, texture, vec3 } from 'three/tsl';
 import { mountainLight } from './mountain-light.js';
+import { canopyShade } from './canopy-shade.js';
+import { GrassTracks } from './grass-tracks.js';
 import { cloudLayer } from './clouds.js';
 import { Horizon } from './horizon.js';
 import { Treeline } from './treeline.js';
-import { Meadow } from './meadow.js';
+import { Meadow, MEADOW_DETAIL_LAYER } from './meadow.js';
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CHUNK_LENGTH, mix, noise, randomFor, ROAD_EDGE, smooth } from './route.js';
-import { atmosphere, makeSky, makeReliefTexture, makeTerrainMaterial, makeWater, skyEnvironment, SUN } from './landscape.js';
-import { aspen, aspenMaterial, conifer, coniferMaterial, grassMaterial, bladeMaterial, flowerMaterial, distantConifer, understory, understoryMaterial } from './forest.js';
+import { atmosphere, makeSky, makeReliefTexture, makeTerrainMaterial, makeBoulderMaterial, makeWater, skyEnvironment, SUN } from './landscape.js';
+import { applyMeadowWind, aspen, aspenMaterial, coniferMaterial, grassMaterial, bladeMaterial, flowerMaterial, understory, understoryMaterial } from './forest.js';
 import { bandBounds, buildTerrain, terrainBand, TERRAIN_STEP as STEP, tileSurface } from './terrain.js';
 
 const paintMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91 });
-const rockMaterial = new THREE.MeshStandardMaterial({ roughness: 0.93, vertexColors: true });
-const railMaterial = new THREE.MeshStandardMaterial({ color: 0x939e9c, metalness: 0.67, roughness: 0.44 });
+const railMaterial = new THREE.MeshStandardMaterial({ color: 0x939e9c, metalness: 0.67, roughness: 0.58 });
 const mineral = new THREE.Color();
-const stone = new THREE.Color('#777775');
-const asphalt = new THREE.Color('#bec8d4');
+const stone = new THREE.Color('#a7a6a1');
+const asphalt = new THREE.Color('#c6cacf');
 const ivory = new THREE.Color('#e6e6ce');
 const amber = new THREE.Color('#dbc28a');
 const dummy = new THREE.Object3D();
@@ -117,7 +118,7 @@ function makeBeam() {
 }
 
 function makeRock() {
-  const shape = new THREE.IcosahedronGeometry(1, 1);
+  const shape = new THREE.IcosahedronGeometry(1, 2);
   const vertices = shape.getAttribute('position');
   const colors = [];
   for (let i = 0; i < vertices.count; i++) {
@@ -135,7 +136,7 @@ function makeRock() {
   return shape;
 }
 
-function scatter(world, tile, chunkId, band, start, scans) {
+function scatter(world, tile, chunkId, band, start, scans, conifer, rockMaterial) {
   const random = randomFor(world.seed ^ Math.imul(chunkId + 17, 0x7c4a541) ^ Math.imul(band, 0x567721));
   const density = world.section(start + CHUNK_LENGTH * 0.5).trees;
   const [left, right] = bandBounds(band);
@@ -270,6 +271,7 @@ function delineators(world, start, end) {
     }
   }
   mesh.count = count;
+  mesh.receiveShadow = true;
   return mesh;
 }
 
@@ -308,7 +310,7 @@ function railing(world, start, end) {
 }
 
 export class WorldView {
-  constructor(scene, assets, world) {
+  constructor(scene, assets, world, camera) {
     this.scene = scene;
     this.world = world;
     this.low = false;
@@ -331,22 +333,36 @@ export class WorldView {
     }
     this.chunks = new Map();
     this.terrainRevision = 0;
-    coniferMaterial.map = assets.bough;
+    coniferMaterial.map = assets.canopy;
+    this.conifer = assets.conifer;
+    this.distantConifer = assets.distantConifer;
     grassMaterial.map = assets.clumps;
     aspenMaterial.map = assets.spray;
     flowerMaterial.map = assets.blossoms;
-    this.treeline = new Treeline(scene, world, (s,x) => this.surfaceHeight(s,x));
-    this.meadow = new Meadow(scene, world, (s,x) => this.surfaceHeight(s,x), assets.leaves, assets.middleLeaves);
+    this.treeline = new Treeline(scene, world, (s,x) => this.surfaceHeight(s,x), this.distantConifer);
+    this.tracks = new GrassTracks();
+    applyMeadowWind(this.tracks);
+    this.meadow = new Meadow(scene, world, (s,x) => this.surfaceHeight(s,x), assets.leafLevels, camera.position);
     const reliefMap = makeReliefTexture(assets.elevations);
-    this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock);
-    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, true);
+    this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks);
+    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, true);
+    this.canopy = canopyShade();
+    for (const material of [this.terrainMaterial, this.lowTerrainMaterial, bladeMaterial, grassMaterial, flowerMaterial, understoryMaterial]) {
+      material.aoNode = this.canopy.ambient;
+    }
     this.horizon = new Horizon(scene, world, this.terrainMaterial, (id, band) => this.chunks.has(id + ':' + band));
-    this.roadMaterial = new THREE.MeshStandardMaterial({
+    this.roadMaterial = new THREE.MeshStandardNodeMaterial({
       vertexColors: true, map: assets.pavement, normalMap: assets.normal,
       normalScale: new THREE.Vector2(0.58, 0.58), roughnessMap: assets.rough, roughness: 0.97,
     });
+    const pavement = texture(assets.pavement);
+    // Preserve the aggregate detail while weathering the brown binder toward grey.
+    this.roadMaterial.colorNode = mixColor(vec3(luminance(pavement.rgb)), pavement.rgb, 0.21).mul(1.53);
+    const paintGrain = texture(assets.pavement, positionWorld.xz.div(5.8)).r;
+    this.markingMaterial = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.91 });
+    this.markingMaterial.colorNode = vec3(smoothstep(0.017, 0.085, paintGrain).mul(0.45).add(0.51));
+    this.rockMaterial = makeBoulderMaterial(assets.bedrock);
     this.rockModels = assets.rocks;
-    this.far = atmosphere(scene);
     this.sky = makeSky();
     scene.environment = skyEnvironment();
     scene.environmentIntensity = 0.48;
@@ -358,7 +374,20 @@ export class WorldView {
     this.clouds = cloudLayer(this.sky, SUN, assets.clouds);
     this.mountainLight = mountainLight(world, SUN);
     const sunlight = this.mountainLight.visibility.mul(this.clouds.shadow);
+    this.far = atmosphere(scene, this.mountainLight.visibilityAt);
+    const backlight = dot(positionWorld.sub(cameraPosition).normalize(), vec3(...SUN.toArray())).max(0).pow(3);
+    for (const material of [grassMaterial, bladeMaterial, flowerMaterial, aspenMaterial]) {
+      material.emissiveNode = diffuseColor.rgb.mul(backlight.mul(sunlight, 0.53).add(0.19));
+    }
     this.water = makeWater(sunlight);
+    // The half-resolution lake keeps the meadow clumps. Individual blades only resolve in the main view.
+    camera.layers.enable(MEADOW_DETAIL_LAYER);
+    this.water.reflector.getVirtualCamera(camera).layers.disable(MEADOW_DETAIL_LAYER);
+    this.lowSun = new THREE.DirectionalLight(this.sun.color, this.sun.intensity);
+    this.lowSun.target = this.sun.target;
+    this.lowSun.castShadow = true;
+    this.lowSun.shadow.shadowNode = sunlight;
+    this.lowSun.visible = false;
     this.sun.shadow.shadowNode = shadow(this.sun).mul(sunlight);
     this.sun.shadow.mapSize.set(2048, 2048);
     Object.assign(this.sun.shadow.camera, { left: -56, right: 56, top: 56, bottom: -56, near: 10, far: 285 });
@@ -366,7 +395,7 @@ export class WorldView {
     this.sun.shadow.normalBias = 0.068;
     this.sun.shadow.bias = -0.00022;
     this.sun.shadow.radius = 2.12;
-    scene.add(this.sky, this.water.anchor, skyLight, this.sun, this.sun.target);
+    scene.add(this.sky, this.water.anchor, skyLight, this.lowSun, this.sun, this.sun.target);
   }
 
   build(id, band, tile) {
@@ -378,7 +407,7 @@ export class WorldView {
     ground.setAttribute('position', new THREE.BufferAttribute(tile.position, 3));
     ground.setAttribute('normal', new THREE.BufferAttribute(tile.normal, 3));
     ground.setAttribute('reliefField', new THREE.BufferAttribute(tile.relief, 4));
-    ground.setAttribute('roadOffset', new THREE.BufferAttribute(tile.roadOffset, 1));
+    ground.setAttribute('groundOffsets', new THREE.BufferAttribute(tile.groundOffsets, 2));
     ground.setIndex(new THREE.BufferAttribute(tile.index, 1));
     const groundMesh = new THREE.Mesh(ground, this.low ? this.lowTerrainMaterial : this.terrainMaterial);
     groundMesh.receiveShadow = true;
@@ -404,14 +433,14 @@ export class WorldView {
         mineral.copy(asphalt).multiplyScalar(0.88 + mottling * 0.24 + roadDust - traffic);
         return { y: world.roadHeight(s, lateral) + 0.03, color: mineral };
       }), this.roadMaterial);
-      const lines = new THREE.Mesh(markings(world, start, end), paintMaterial);
+      const lines = new THREE.Mesh(markings(world, start, end), this.markingMaterial);
       road.receiveShadow = lines.receiveShadow = true;
       const rails = railing(world, start, end);
-      rails.forEach(rail => { rail.castShadow = true; });
+      rails.forEach(rail => { rail.castShadow = rail.receiveShadow = true; });
       chunk.add(road, lines, delineators(world, start, end), ...rails);
     }
 
-    const { trees, aspens, rocks, nearStones, scanned, shrubs } = scatter(world, tile, id, band, start, band === 0 ? this.rockModels : []);
+    const { trees, aspens, rocks, nearStones, scanned, shrubs } = scatter(world, tile, id, band, start, band === 0 ? this.rockModels : [], this.conifer, this.rockMaterial);
     trees.castShadow = aspens.castShadow = rocks.castShadow = true;
     trees.receiveShadow = aspens.receiveShadow = rocks.receiveShadow = shrubs.receiveShadow = true;
     chunk.add(trees, aspens, rocks, nearStones, ...scanned, shrubs);
@@ -480,6 +509,7 @@ export class WorldView {
       }
     }
 
+    this.canopy.update(car, this.chunks, this.terrainRevision);
     this.mountainLight.update(car, eager);
     this.horizon.update(car, low, this.terrainRevision, eager);
     this.treeline.update(car, low, eager);
@@ -489,7 +519,7 @@ export class WorldView {
       const rowDistance = Math.abs(id - current);
       const near = rowDistance <= 1 && band === currentBand;
       trees.visible = treeCount > 0 && rowDistance <= (low ? 6 : 8);
-      trees.geometry = near && !low ? conifer : distantConifer;
+      trees.geometry = near && !low ? this.conifer : this.distantConifer;
       trees.castShadow = near;
       aspens.visible = aspens.count > 0 && rowDistance <= (low ? 3 : 6);
       aspens.castShadow = near;
@@ -505,6 +535,8 @@ export class WorldView {
   setQuality(low) {
     this.far.value = low ? 4880 : 7600;
     this.low = low;
+    this.sun.visible = !low;
+    this.lowSun.visible = low;
     this.horizon.material = low ? this.lowTerrainMaterial : this.terrainMaterial;
     for (const { mesh } of this.horizon.pages.values()) mesh.material = this.horizon.material;
     for (const { groundMesh, water } of this.chunks.values()) {
@@ -521,5 +553,6 @@ export class WorldView {
     const x = car.x + Math.sin(car.heading) * 31;
     this.sun.target.position.set(Math.round(x), Math.round(this.surfaceHeight(s, x)), -Math.round(s));
     this.sun.position.copy(this.sun.target.position).addScaledVector(SUN, 125);
+    this.lowSun.position.copy(this.sun.position);
   }
 }
