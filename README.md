@@ -19,7 +19,7 @@ The default seed is `83472`. Choose **New world** from the start or pause screen
 
 Gravel pullouts overlook lakes and fjords. On the default seed, start at 90 m to approach a lakeside bench or at 1,800 m to follow a river. Auto-drive keeps to the right-hand lane. Double centerlines mark sharp bends and blind crests.
 
-Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. Alternating groups of landscapes include inland lakes and steep-sided coastal inlets with an open passage to the sea. The road follows the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
+Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. Alternating groups of landscapes include inland lakes and steep-sided coastal inlets with an open passage to the sea. The road takes its elevation from the valley floor, rounds off steep crests and winds through saddles between rock spurs on some alpine stretches. [Drive a mountain pass](https://sunej1.github.io/cozy-roads/?seed=83472&start=420) A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
 
 The **Look** selector on the start and pause screens switches between **Cozy** (peach horizons, sage grass and softer rock detail) and **Classic**. It remembers your choice on this browser.
 
@@ -37,7 +37,7 @@ The measurements are elapsed time between browser animation callbacks. They incl
 
 | Preset | Rendering |
 | --- | --- |
-| Standard | Surveyed mountain relief, slope-dependent snow, distant forest stands, volumetric clouds, terrain and cloud shadows, layered meadow grass that bends under the tires, wind-animated trees, and planar reflections on lakes and rivers. |
+| Standard | Surveyed mountain relief, slope-dependent snow, distant forest stands, volumetric clouds, terrain and cloud shadows, layered meadow grass that bends under the tires, wind-animated trees, softened planar reflections on lakes, and depth-dependent ripples that drift with the river current. |
 | Cinematic | Traces short sun-contact rays and reflection rays against the visible depth buffer. Water and polished materials receive screen-space reflections. Planar water and environment reflections supply off-screen scenery. Also includes diffuse bounce, ambient occlusion, sunbeams and HDR bloom. Begins rendering at full resolution, can reduce each internal dimension to 90% under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
 | Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler terrain, water, and lighting. |
 

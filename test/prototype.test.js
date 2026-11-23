@@ -365,7 +365,7 @@ test('driving tiles and mountain pages carry finite signed distances to the road
 test('quality changes keep the meadow visible while cell densities are replaced', async () => {
   const { Scene } = await import('three/webgpu');
   const { Meadow } = await import('../src/meadow.js');
-  const meadow = new Meadow(new Scene(), { seed: 17, centerX: () => -1000, turnoutWidth: () => 0 }, () => 40);
+  const meadow = new Meadow(new Scene(), { seed: 17, centerX: () => -1000, turnoutWidth: () => 0, section: () => ({x: -1000}) }, () => 40);
   const car = { x: 0, s: 0 };
   meadow.update(car, false, true);
   const sample = () => {
@@ -478,14 +478,9 @@ test('seeded rivers run downhill into lakes on either side of a divide and keep 
 });
 
 test('trail suspension absorbs small crests and preserves takeoff pitch over a drop', () => {
-  const world = createWorld();
-  const tiles = new Map();
-  const height = (s, x) => {
-    const id = Math.floor(s / CHUNK_LENGTH);
-    if (!tiles.has(id)) tiles.set(id, buildTerrain(world, id));
-    return tileSurface(tiles.get(id), id, s, x);
-  };
-  const car = { ...newCarState(world), s: 430, x: world.centerX(430) + 160, heading: -0.8 };
+  const world = { centerX: () => 0, routePose: () => ({ length: 1, yaw: 0 }) };
+  const height = s => 12 + (s > 10 && s < 21 ? 0.47 * Math.sin((s - 10) * Math.PI / 11) ** 2 : 0);
+  const car = { ...newCarState(world), speed: 14 };
   let peak = 0, extended = false, compressed = false;
   for (let i = 0; i < 1400; i++) {
     const inAir = car.clearance > 0, pitch = car.pitch;
@@ -571,6 +566,10 @@ test('fjords have a deep tidal trough, a winding outlet, a widening sound and sl
         }
         assert.ok(wet.size > 3 && (!last || [...last].some(t => wet.has(t))), 'continuous tidal channel');
         last = wet;
+      }
+      const upstream = world.section(inlet.s + inlet.length + 1);
+      for (let offshore = 1600; offshore <= 8000; offshore += 40) {
+        assert.ok(world.shoreDistance(upstream, inlet.side * offshore) < 0, 'the tidal outlet stays at sea level');
       }
       const sea = buildWater(world, Math.floor(mouth.s / CHUNK_LENGTH));
       assert.ok(sea.position.some((v, i) => i % 3 === 0 && v * inlet.side > 9000));
@@ -669,5 +668,94 @@ test('blind crests and tight curves use solid markings and open straights allow 
     assert.equal(restrictedPassing({centerX: s => 0.003*s*s, roadHeight: flat}, s), true);
     assert.equal(restrictedPassing({centerX: flat, roadHeight: s => 90 - 0.001*s*s}, s), true);
     assert.equal(restrictedPassing({centerX: flat, roadHeight: s => 90 + 0.001*s*s}, s), false);
+  }
+});
+
+test('the road follows surveyed dry ground, with bounded grades and local earthworks', () => {
+  for (const seed of [0, DEFAULT_SEED, 999, 43, 1770441893, 4294967295]) {
+    const world = createWorld(seed);
+    for (let s = -13440; s <= 13440; s += 16) {
+      const row = world.section(s), center = world.roadHeight(s);
+      const slope = (world.roadHeight(s + 2) - world.roadHeight(s - 2)) / 4;
+      assert.ok(Math.abs(slope) <= 0.09001);
+      const fill = row.grade - world.naturalHeight(row, 0);
+      assert.ok(fill < 1.9 && fill > -4.5, 'pavement follows the existing ground');
+      assert.ok(center - Math.max(world.sampleTerrain(row, -22), world.sampleTerrain(row, 22)) < 1.6,
+        'both verges must not drop away into a road-shaped ridge');
+      for (const side of [-1, 1]) {
+        const edge = ROAD_EDGE + Math.max(0, row.turnout * side);
+        assert.ok(world.shoreDistance(row, side * edge) < 0);
+        assert.equal(world.sampleTerrain(row, side * ROAD_EDGE), world.roadHeight(s, side * ROAD_EDGE));
+        const beyond = side * (edge + 10);
+        assert.equal(world.sampleTerrain(row, beyond), world.naturalHeight(row, beyond));
+      }
+    }
+  }
+});
+
+test('a drive can enter and leave a two-sided mountain pass on different seeds', () => {
+  for (const seed of [0, DEFAULT_SEED, 999, 4294967295]) {
+    const world = createWorld(seed);
+    let passes = 0;
+    for (let index = -24; index <= 24; index++) {
+      const center = index * REGION_LENGTH;
+      if (world.biomeAt(center).name !== 'Alpine mountains') continue;
+      let inside = 0, nearestCliff = Infinity;
+      for (let ds = -112; ds <= 112; ds += 8) {
+        const row = world.section(center + ds);
+        const gains = [-1, 1].map(side => {
+          let rise = 0;
+          for (let d = 12; d <= 72; d += 4) {
+            const h = world.sampleTerrain(row, side * d) - row.grade;
+            rise = Math.max(rise, h);
+            if (h > 32) nearestCliff = Math.min(nearestCliff, d);
+          }
+          return rise;
+        });
+        if (Math.min(...gains) > 10 && Math.max(...gains) > 45) inside++;
+      }
+      if (inside < 8 || nearestCliff > 52) continue;
+      passes++;
+      const middle = world.section(center);
+      assert.ok(Math.abs(middle.x - middle.axis) > 32, 'the alignment physically turns into the hills');
+      for (const ds of [-270, 270]) {
+        const approach = world.section(center + ds);
+        assert.ok(Math.abs(approach.x - approach.axis) < 30);
+      }
+    }
+    assert.ok(passes >= 2, 'several mountain drives on either side of station zero');
+  }
+});
+
+test('inlet headwalls and mountain transitions stay continuous in geographic coordinates', () => {
+  for (const seed of [4043606126, DEFAULT_SEED, 0]) {
+    const world = createWorld(seed);
+    for (let index = -20; index <= 20; index++) {
+      const center = index * REGION_LENGTH, feature = world.biomeAt(center);
+      const limits = [center - 264, center + 264, center - 280];
+      if (feature.lake) for (const side of [-1, 1]) for (const end of [0, 80, 200]) {
+        limits.push(feature.lake.s + side * (feature.lake.length + end));
+      }
+      for (const s of limits) {
+        const a = world.section(s - 0.0001), b = world.section(s + 0.0001);
+        for (const x of [-1800, -600, -120, 0, 120, 600, 1800]) {
+          const before = world.sampleTerrain(a, x), after = world.sampleTerrain(b, x + a.x - b.x);
+          assert.ok(Math.abs(before - after) < 0.025, 'no step as a landform enters or leaves a row');
+        }
+      }
+    }
+  }
+});
+
+test('the water strip reaches dry rendered triangles on both sides of inland streams', () => {
+  for (const [seed, id] of [[0, 6], [DEFAULT_SEED, 30], [999, 14], [43, 41]]) {
+    const world = createWorld(seed), tile = buildTerrain(world, id), strip = buildWater(world, id);
+    assert.ok(strip && !strip.hasLake);
+    for (let start = 0; start < strip.position.length; start += 39) {
+      for (const i of [start, start + 36]) {
+        const [x, level, z] = strip.position.subarray(i, i + 3);
+        assert.ok(tileSurface(tile, id, -z, x) >= level - 0.001);
+      }
+    }
   }
 });

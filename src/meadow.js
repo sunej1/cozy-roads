@@ -38,10 +38,8 @@ export class Meadow {
       if (verge < 0.48) continue;
       const y = this.height(s, x);
       if (y < 0.2 || y > 220) continue;
-      if (y < 12) {
-        const row = this.world.section(s);
-        if (this.world.shoreDistance(row, x - row.x) > -3 - 2 * noise(x / 8, s / 8)) continue;
-      }
+      const row = this.world.section(s);
+      if (y <= (row.water?.level ?? 0) + 2 && this.world.shoreDistance(row, x - row.x) > -3 - 2 * noise(x / 8, s / 8)) continue;
       const dx = this.height(s, x + 0.8) - y,
         ds = this.height(s + 0.8, x) - y;
       const grade = Math.hypot(dx, ds) / 0.8;

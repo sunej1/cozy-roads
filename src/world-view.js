@@ -214,7 +214,11 @@ function scatter(world, tile, chunkId, band, start, scans, conifer, rockMaterial
     const talus = Math.max(smooth(3, 13, uphill), 0.58 * bank);
     const erratic = random() < 0.026;
     const size = 0.30 + random() ** 2 * (erratic ? 3.6 : mix(0.88, 3.6, talus));
-    dummy.position.set(x, y - 0.07 * size, -s);
+    const foot = Math.min(tileSurface(tile, chunkId, s, x - size, band), tileSurface(tile, chunkId, s, x + size, band),
+      tileSurface(tile, chunkId, s - size, x, band), tileSurface(tile, chunkId, s + size, x, band));
+    // Loose talus settles below a rock face. Reject perches with an unsupported downslope edge.
+    if (y - foot > size * 0.96) continue;
+    dummy.position.set(x, Math.min(y - 0.10 * size, foot + 0.16 * size), -s);
     const angle = random() * Math.PI * 2;
     dummy.rotation.set(random() * 0.78, angle, random() * 0.72);
     dummy.scale.set(size * 1.1, size * 0.66, size);
@@ -262,7 +266,7 @@ function scatter(world, tile, chunkId, band, start, scans, conifer, rockMaterial
     const x = world.centerX(s) + offset;
     const y = tileSurface(tile, chunkId, s, x, band);
     const cover = noise(offset * 0.16 + 38, s * 0.12);
-    if (Math.abs(offset) < ROAD_EDGE + 1 + Math.max(0, world.turnoutWidth(s) * Math.sign(offset)) || y < -0.03 || y > 124 || cover < 0.44 || (y < 8 && world.shoreDistance(world.section(s), offset) > -1)) continue;
+    if (Math.abs(offset) < ROAD_EDGE + 1 + Math.max(0, world.turnoutWidth(s) * Math.sign(offset)) || y < -0.03 || y > 124 || cover < 0.44 || world.shoreDistance(world.section(s), offset) > -1) continue;
     dummy.position.set(x, y - 0.018, -s);
     dummy.rotation.set(0, random() * Math.PI * 2, 0);
     const size = 0.39 + random() ** 1.4 * 1.13;

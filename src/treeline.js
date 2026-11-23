@@ -31,7 +31,7 @@ export class Treeline {
         const y = world.sampleTerrain(row, lateral);
         const grove = noise(x / 125 + (world.seed % 997), s / 152);
         const limit = 380 + grove * 170 + 65 * noise(x / 44, s / 58);
-        if (y < 5 || y > limit || grove < 0.24 || (y < 10 && world.shoreDistance(row, lateral) > -2)) continue;
+        if (y < 5 || y > limit || grove < 0.24 || (y < (row.water?.level ?? 0) + 2 && world.shoreDistance(row, lateral) > -2)) continue;
         const grade =
           Math.hypot(
             world.sampleTerrain(row, lateral + 5) - y,

@@ -55,8 +55,9 @@ export function buildWater(world, id, seaReach = 14000) {
     const f = sample.fjord;
     // Surround the whole curved outlet. The terrain occludes the dry parts of the strip.
     const outlet = f && Math.abs(f.t - 0.43) < 0.70 ? f.side : 0;
-    const margin = Math.min(10, (water.right - water.left) * 0.05);
-    const left = water.left - margin, right = water.right + margin;
+    // Cover the enclosing terrain triangles at the shore. Clipping at the
+    // analytic bank can expose a dry strip below the rendered waterline.
+    const left = water.left - 10, right = water.right + 10;
     // Low quality estimates the reflected skyline from the land on each bank.
     const bankReach = water.lake ? 155 : 28;
     const west = water.left - bankReach, east = water.right + bankReach;

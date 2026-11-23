@@ -123,20 +123,21 @@ export function makeWater(sunVisibility, bedrock, cozy) {
     .add(fine.sub(0.5).mul(0.24, waveFalloff))
     .mul(wind.mul(0.95).add(0.38), reach, waveFalloff.mul(0.72).add(0.28));
   const axis = flow.div(current.max(0.01));
-  const downstream = dot(p, axis);
-  const crossStream = dot(p, vec2(axis.y.negate(), axis.x));
-  const tongue = crossStream.mul(0.47).add(eddies.x.mul(6)).sin();
-  const train = downstream.mul(2.1).sub(clock.mul(3.1)).add(tongue.mul(1.8), eddies.y.mul(7)).sin();
-  const shoalChop = smoothstep(0.12, 2.1, depth).oneMinus().mul(current, waveFalloff, stream.z.mul(0.84).add(0.16));
-  const disturbance = ripple.mul(current.mul(-0.46).add(1))
-    .add(eddies.sub(0.5).mul(0.22, current, waveFalloff), axis.mul(train, shoalChop, 0.12)).toVar();
+  // Advect short, irregular crests in the local current. Projecting a world
+  // position onto a changing tangent makes the texture shear around bends.
+  const crossAxis = vec2(axis.y.negate(), axis.x);
+  const shoalChop = smoothstep(0.12, 2.1, depth).oneMinus().mul(current, waveFalloff, stream.z);
+  const riffleSlope = eddies.sub(0.5).mul(waveFalloff);
+  const disturbance = ripple.mul(current.mul(-0.78).add(1))
+    .add(axis.mul(riffleSlope.x, shoalChop.mul(0.44).add(current.mul(0.12))),
+      crossAxis.mul(riffleSlope.y, current, 0.08)).toVar();
   const waterNormal = vec3(disturbance.x, 1, disturbance.y).normalize();
   const fresnel = dot(waterNormal, view).clamp(0, 1).oneMinus().pow(5).mul(0.97).add(0.025);
   const opticalPath = depth.div(dot(view, waterNormal).clamp(0.36, 1));
   const transmission = opticalPath.mul(vec3(-0.54, -0.24, -0.15)).exp();
   const gravel = texture(bedrock, p.mul(0.51).add(disturbance.mul(depth.min(3), 0.7))).b;
-  const bed = mix(color('#5d5342'), color('#ada38a'), gravel);
-  const shoal = mix(color('#428c83'), color('#808961'), current);
+  const bed = mix(color('#645c4c'), color('#938776'), gravel);
+  const shoal = mix(color('#428c83'), color('#61796d'), current);
   const deep = mix(shoal, mix(color('#245b66'), color('#4a685c'), current), smoothstep(0.5, 9, opticalPath));
   const body = mix(deep, bed, transmission).mul(sunVisibility.mul(0.26).add(0.74));
   const sunlight = vec3(SUN.x, SUN.y, SUN.z);
@@ -144,7 +145,7 @@ export function makeWater(sunVisibility, bedrock, cozy) {
   const skyTint = mix(mix(color('#759fae'), color('#a3b4bf'), cozy), mix(color('#e5cbb0'), color('#ecc2a2'), cozy), dot(view.negate(), sunlight).max(0).pow(6));
   const distortion = disturbance.mul(vec2(0.105, 0.17), smoothstep(0, 2.5, depth));
   const reflectionUV = screenUV.flipX().add(distortion);
-  const spread = wind.mul(0.0029).add(0.0007);
+  const spread = wind.mul(0.008).add(0.004);
   const sampleReflection = uv => planar.sample(uv.clamp(0.004, 0.996)).rgb;
   const reflected = sampleReflection(reflectionUV).mul(0.48).add(
     sampleReflection(reflectionUV.add(vec2(0.6, 1).mul(spread))).mul(0.26),
@@ -159,14 +160,15 @@ export function makeWater(sunVisibility, bedrock, cozy) {
   const cheapReflection = mix(bankTint, skyTint, smoothstep(-0.08, 0.11, direction.y.sub(horizon)));
   // The reflected sky contains an HDR solar disc. Resolve its highlight once through the wave normal.
   const softReflection = reflected.div(reflected.r.max(reflected.g).max(reflected.b).sub(0.9).max(0).mul(0.62).add(1));
-  const reflectionWeight = fresnel.mul(bankCoverage, wind.mul(-0.22).add(0.64));
-  const riffles = smoothstep(0.64, 0.91, eddies.y).mul(smoothstep(0.53, 0.94, train), shoalChop, 0.42);
+  const reflectionWeight = fresnel.mul(bankCoverage, wind.mul(-0.16).add(0.48));
+  // Reflections on moving reaches sample the local banks as the stream descends.
+  const scenery = mix(softReflection, cheapReflection, current.mul(0.72).add(0.28).clamp(0, 1));
   const material = new THREE.MeshBasicNodeMaterial();
   const lowMaterial = new THREE.MeshBasicNodeMaterial();
-  for (const [surface, reflection] of [[material, softReflection], [lowMaterial, cheapReflection]]) {
-    surface.userData.waterReflection = 0.24;
+  for (const [surface, reflection] of [[material, scenery], [lowMaterial, cheapReflection]]) {
+    surface.userData.waterReflection = 0.08;
     surface.colorNode = mix(body, reflection, reflectionWeight)
-      .add(color('#ffdfb4').mul(glint), color('#bbc4bb').mul(riffles));
+      .add(color('#ffdfb4').mul(glint));
   }
 
   return { anchor, clock, material, lowMaterial, reflector: planar.reflector };
