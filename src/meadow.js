@@ -33,7 +33,8 @@ export class Meadow {
       const slot = (i * 47) % (grid * grid);
       const x = (cx + ((slot % grid) + random()) / grid) * CELL;
       const s = (cs + (Math.floor(slot / grid) + random()) / grid) * CELL;
-      const verge = Math.abs(x - this.world.centerX(s)) - ROAD_EDGE;
+      const offset = x - this.world.centerX(s);
+      const verge = Math.abs(offset) - ROAD_EDGE - Math.max(0, this.world.turnoutWidth(s) * Math.sign(offset));
       if (verge < 0.48) continue;
       const y = this.height(s, x);
       if (y < 0.2 || y > 220) continue;

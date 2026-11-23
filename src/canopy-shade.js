@@ -11,9 +11,12 @@ export function canopyShade() {
   const map = new THREE.DataTexture(data, SIZE, SIZE, THREE.RedFormat);
   map.minFilter = map.magFilter = THREE.LinearFilter;
   const origin = uniform(new THREE.Vector2());
-  const uv = positionWorld.xz.sub(origin).div(SPAN);
-  const edge = uv.min(uv.oneMinus());
-  const shade = texture(map, uv).r.mul(smoothstep(0, 0.08, edge.x.min(edge.y)));
+  function coverAt(point) {
+    const uv = point.sub(origin).div(SPAN);
+    const edge = uv.min(uv.oneMinus());
+    return texture(map, uv).level(0).r.mul(smoothstep(0, 0.08, edge.x.min(edge.y)));
+  }
+  const cover = coverAt(positionWorld.xz);
   let revision;
   function update(car, chunks, terrainRevision) {
     const x = Math.round(car.x / 32) * 32 - SPAN / 2,
@@ -43,5 +46,5 @@ export function canopyShade() {
     }
     map.needsUpdate = true;
   }
-  return { ambient: shade.oneMinus(), update };
+  return { ambient: cover.oneMinus(), cover, coverAt, update };
 }

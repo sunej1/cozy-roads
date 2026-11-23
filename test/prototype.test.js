@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { CHUNK_LENGTH, drive, newCarState, spawnStation, ROAD_EDGE, surfaceAt, TOUR_SPEED } from '../src/route.js';
+import { CHUNK_LENGTH, drive, newCarState, spawnStation, roadBend, restrictedPassing, ROAD_EDGE, LANE_CENTER, surfaceAt, TOUR_SPEED } from '../src/route.js';
 import { bandBounds, buildTerrain, buildWater, terrainBand, tileSurface, TERRAIN_COLUMNS } from '../src/terrain.js';
 import { createWorld as seededWorld, DEFAULT_SEED, parseSeed, REGION_LENGTH } from '../src/world.js';
 import { carveBedrock } from '../src/highlands.js';
@@ -37,7 +37,7 @@ test('auto-drive is repeatable and keeps moving past the previous route boundary
   const car = run();
   assert.deepEqual(car, run());
   assert.ok(Math.abs(car.distance - 600) < 1e-8);
-  assert.equal(car.x, world.centerX(car.s));
+  assert.equal(car.x, world.centerX(car.s) + LANE_CENTER);
   for (let step = 0; step < 18000; step++) drive(car, 1 / 120, {}, true, world, () => 0, VEHICLES.wagon);
   assert.ok(car.s > 3000);
   assert.ok(Math.abs(car.distance - 3600) < 1e-7);
@@ -85,9 +85,9 @@ test('terrain tiles match across boundaries regardless of build order', () => {
   const river = buildWater(world, 6);
   assert.equal(river.hasLake, false);
   assert.equal(lake.hasLake, true);
-  assert.ok(river.flow.some(value => value > 0.5));
+  assert.ok(river.flow.some((value, i) => i % 3 === 1 && value > 0.5));
   const next = buildWater(world, 7);
-  for (const [field, stride] of [['position', 39], ['flow', 26], ['depth', 13]]) {
+  for (const [field, stride] of [['position', 39], ['flow', 39], ['depth', 13], ['banks', 26]]) {
     assert.deepEqual(river[field].slice(-stride), next[field].slice(0, stride));
   }
 });
@@ -346,14 +346,15 @@ test('the shadow behind an isolated ridge follows the sun from either side of th
 test('driving tiles and mountain pages carry finite signed distances to the road, waterline and shore', () => {
   const world = createWorld(DEFAULT_SEED);
   for (const mesh of [buildTerrain(world, 0), buildTerrain(world, 6), mountainPage(world, 0, 0, 32)]) {
-    assert.equal(mesh.groundOffsets.length, mesh.position.length);
+    assert.equal(mesh.groundOffsets.length, mesh.position.length / 3 * 4);
     let wet = 0, dry = 0;
-    for (let i = 0; i < mesh.groundOffsets.length / 3; i++) {
+    for (let i = 0; i < mesh.groundOffsets.length / 4; i++) {
       const row = world.section(-mesh.position[i * 3 + 2]);
-      const offset = mesh.groundOffsets[i * 3], shore = mesh.groundOffsets[i * 3 + 1];
-      assert.ok(Math.abs(mesh.groundOffsets[i * 3 + 2] - (row.water?.level ?? 0)) < 0.001);
+      const offset = mesh.groundOffsets[i * 4], shore = mesh.groundOffsets[i * 4 + 1];
+      assert.ok(Math.abs(mesh.groundOffsets[i * 4 + 2] - (row.water?.level ?? 0)) < 0.001);
       assert.ok(Math.abs(row.x + offset - mesh.position[i * 3]) < 0.001);
       assert.ok(Math.abs(shore - Math.max(-128, world.shoreDistance(row, offset))) < 0.001);
+      assert.ok(Math.abs(mesh.groundOffsets[i * 4 + 3] - world.turnoutWidth(row.s)) < 0.001);
       if (shore > 0) wet++;
       if (shore < -8) dry++;
     }
@@ -364,7 +365,7 @@ test('driving tiles and mountain pages carry finite signed distances to the road
 test('quality changes keep the meadow visible while cell densities are replaced', async () => {
   const { Scene } = await import('three/webgpu');
   const { Meadow } = await import('../src/meadow.js');
-  const meadow = new Meadow(new Scene(), { seed: 17, centerX: () => -1000 }, () => 40);
+  const meadow = new Meadow(new Scene(), { seed: 17, centerX: () => -1000, turnoutWidth: () => 0 }, () => 40);
   const car = { x: 0, s: 0 };
   meadow.update(car, false, true);
   const sample = () => {
@@ -393,7 +394,7 @@ test('gravity rolls downhill, slows an uphill coast and leaves a cross-slope car
   assert.equal(downhill.clearance, 0);
   assert.ok(coast(s => 100 + s * 0.16, 12).speed < coast(() => 100, 12).speed);
   const crossSlope = coast((s, x) => 100 + x * 0.38, 12);
-  assert.equal(crossSlope.x, 0);
+  assert.equal(crossSlope.x, LANE_CENTER);
   assert.ok(crossSlope.roll > 0.3);
 });
 
@@ -449,7 +450,7 @@ test('a car can clear a flooded ditch and recovers if it lands in deep water', (
   let recovery;
   for (let i = 0; i < 180 && !recovery; i++) recovery = drive(falling, 1 / 120, {}, false, world, basin, vehicle);
   assert.equal(recovery, 'deep-water');
-  assert.equal(falling.x, 0);
+  assert.equal(falling.x, LANE_CENTER);
   assert.equal(falling.clearance, 0);
 });
 
@@ -524,7 +525,7 @@ test('every car can ford shallows and drive away after deep water at lake, river
       }
       assert.ok(waded);
       assert.equal(recovery, 'deep-water');
-      assert.equal(car.x, world.centerX(car.s));
+      assert.equal(car.x, world.centerX(car.s) + LANE_CENTER);
       assert.equal(car.speed, 0);
       const distance = car.distance;
       assert.ok(distance > 10);
@@ -541,7 +542,7 @@ test('random departures start on pavement with a fresh trip meter and pinned sta
   for (const s of sample) {
     const car = newCarState(world, s);
     assert.equal(car.s, s);
-    assert.equal(car.x, world.centerX(s));
+    assert.equal(car.x, world.centerX(s) + LANE_CENTER);
     assert.equal(car.heading, -world.routePose(s).yaw);
     assert.equal(car.distance, 0);
     assert.equal(car.speed, 0);
@@ -584,5 +585,89 @@ test('fjords have a deep tidal trough, a winding outlet, a widening sound and sl
         assert.ok(world.shoreDistance(row, 0) < -ROAD_EDGE);
       }
     }
+  }
+});
+
+test('overlooks provide a dry gravel apron and one set of furniture across tile boundaries', async () => {
+  const { BoxGeometry, MeshBasicMaterial } = await import('three/webgpu');
+  const { wayside } = await import('../src/wayside.js');
+  const rock = new BoxGeometry(), material = new MeshBasicMaterial();
+  for (const seed of [0, DEFAULT_SEED, 4294967295]) {
+    const world = createWorld(seed);
+    for (const group of [-1, 0, 1]) {
+      const lake = Array.from({length: 4}, (_, i) => world.biomeAt((group * 4 + i) * REGION_LENGTH).lake).find(Boolean);
+      const s = lake.overlook;
+      assert.equal(world.turnoutWidth(s), 12 * lake.side);
+      for (const d of [-49, 49]) assert.equal(Math.abs(world.turnoutWidth(s + d)), 0);
+      const counts = {};
+      for (let id = Math.floor((s - 12) / CHUNK_LENGTH); id <= Math.floor((s + 12) / CHUNK_LENGTH); id++) {
+        const tile = buildTerrain(world, id);
+        const fixtures = wayside(world, tile, id, rock, material);
+        const rebuilt = wayside(world, tile, id, rock, material);
+        assert.deepEqual(fixtures.map(mesh => mesh.instanceMatrix.array), rebuilt.map(mesh => mesh.instanceMatrix.array));
+        for (const mesh of fixtures) {
+          counts[mesh.name] = (counts[mesh.name] ?? 0) + mesh.count;
+          for (let i = 0; i < mesh.count; i++) {
+            const [x, y, z] = mesh.instanceMatrix.array.slice(16 * i + 12, 16 * i + 15);
+            assert.ok(Number.isFinite(x + y + z));
+            assert.ok(Math.abs(x - world.centerX(-z)) > ROAD_EDGE);
+            if (mesh.name === 'Bend markers') {
+              const bend = roadBend(world, -z);
+              assert.ok(Math.abs(bend) >= 5.2 && (x - world.centerX(-z)) * bend < 0);
+            }
+            if (mesh.name === 'Overlook bench' || mesh.name === 'Parking stops') {
+              assert.ok(y > world.waterLevel(-z, x) + 0.5);
+              assert.ok(Math.abs(y - tileSurface(tile, id, -z, x)) < 0.01);
+            }
+          }
+        }
+      }
+      assert.equal(counts['Overlook bench'], 1);
+      assert.equal(counts['Parking stops'], 4);
+      const h = (s, x) => world.terrainHeight(s, x - world.centerX(s));
+      const x = world.centerX(s) + 11 * lake.side;
+      assert.equal(surfaceAt({s, x}, world, h), 'Gravel');
+      assert.equal(surfaceAt({s, x: world.centerX(s) - 11 * lake.side}, world, h), 'Off road');
+      assert.ok(Math.abs(h(s, x) - world.roadHeight(s)) < 0.65);
+    }
+  }
+});
+
+test('shallower inner banks, slower margins and riffle reaches follow the generated stream', () => {
+  for (const seed of [DEFAULT_SEED, 9, 190013]) {
+    const world = createWorld(seed);
+    let bends = 0, runs = 0, riffles = 0, bars = 0;
+    for (let s = -1250; s < 1500; s += 8) {
+      const row = world.section(s), w = row.water;
+      if (!w || w.lake || w.source < 0.99 || Math.abs(w.flow) < 0.99) continue;
+      if (w.riffle > 0.7) riffles++;
+      if (w.riffle < 0.1) runs++;
+      if (Math.abs(w.bend) < 0.75) continue;
+      const inside = Math.sign(w.bend) * 0.74 * w.width;
+      const shelf = world.sampleTerrain(row, w.center + inside);
+      assert.ok(shelf > world.sampleTerrain(row, w.center - inside));
+      if (shelf >= w.level) bars++;
+      bends++;
+    }
+    assert.ok(bends > 10 && riffles > 3 && runs > 3 && bars > 0);
+    const strip = buildWater(world, 0);
+    assert.ok(strip.flow.every(Number.isFinite));
+    assert.equal(strip.banks.length, strip.depth.length * 2);
+    assert.ok(strip.banks.every(value => Number.isFinite(value) && value >= 0 && value <= 2));
+    assert.equal(strip.flow.length, strip.position.length);
+    const river = Array.from({length: 8}, (_, i) => buildWater(world, i + 4)).find(mesh => mesh && !mesh.hasLake && Math.abs(mesh.flow[19]) > 0.8);
+    assert.ok(river);
+    const velocity = i => Math.hypot(river.flow[3*i], river.flow[3*i+1]);
+    assert.ok(velocity(6) > velocity(0) * 1.5 && velocity(6) > velocity(12) * 1.5);
+  }
+});
+
+test('blind crests and tight curves use solid markings and open straights allow passing', () => {
+  const flat = () => 0;
+  assert.equal(restrictedPassing({centerX: flat, roadHeight: flat}, 0), false);
+  for (const s of [-47, -4, 0, 12, 120, 128]) {
+    assert.equal(restrictedPassing({centerX: s => 0.003*s*s, roadHeight: flat}, s), true);
+    assert.equal(restrictedPassing({centerX: flat, roadHeight: s => 90 - 0.001*s*s}, s), true);
+    assert.equal(restrictedPassing({centerX: flat, roadHeight: s => 90 + 0.001*s*s}, s), false);
   }
 });

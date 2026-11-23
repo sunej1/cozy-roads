@@ -6,7 +6,7 @@ import { driverEye } from './forest.js';
 import { WorldView } from './world-view.js';
 import { createWorld, parseSeed } from './world.js';
 import { makeCinematic } from './cinematic.js';
-import { ROAD_EDGE, BENCHMARK_SECONDS, clamp, drive, groundPose, joinRoad, mix, newCarState, spawnStation, surfaceAt, TOUR_SPEED } from './route.js';
+import { ROAD_EDGE, LANE_CENTER, BENCHMARK_SECONDS, clamp, drive, groundPose, joinRoad, mix, newCarState, spawnStation, surfaceAt, TOUR_SPEED } from './route.js';
 import { VEHICLES, vehicleId } from './vehicles.js';
 import { RecentFrames, ResolutionBudget, summarize } from './timing.js';
 
@@ -189,8 +189,9 @@ function poseScene(blend) {
     const intro = mode === 'ready';
     const lookAhead = intro ? 34 : 17;
     const back = intro ? 9.7 : 7.75;
-    desiredCamera.set(world.centerX(s - back) + (intro ? 3.15 : 1.10), y + (intro ? 3.52 : 2.92), -s + back);
-    desiredTarget.set(world.centerX(s + lookAhead) - (intro ? 21 : 0),
+    desiredCamera.set(world.centerX(s - back) + LANE_CENTER + (intro ? 3.15 : 1.10), y + (intro ? 3.52 : 2.92), -s + back);
+    const lake = intro && world.biomeAt(s).lake;
+    desiredTarget.set(world.centerX(s + lookAhead) + LANE_CENTER + (lake ? lake.side * 21 : 0),
       world.roadHeight(s + lookAhead) + (intro ? 4.7 : 1.55), -s - lookAhead);
   } else {
     const back = 7.95;

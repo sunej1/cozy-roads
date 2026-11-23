@@ -1,4 +1,5 @@
 export const ROAD_EDGE = 4.4;
+export const LANE_CENTER = ROAD_EDGE / 2;
 export const CHUNK_LENGTH = 128;
 export const BENCHMARK_SECONDS = 30;
 export const TOUR_SPEED = 20;
@@ -44,6 +45,18 @@ export function spawnStation(query, random = Math.random) {
   return Math.floor(random() * 24001) - 12000;
 }
 
+export function roadBend(world, s) {
+  return (world.centerX(s - 42) + world.centerX(s + 42)) / 2 - world.centerX(s);
+}
+
+// Evaluate a full sight-distance window on one grid so paint meets across tiles.
+export function restrictedPassing(world, s) {
+  const middle = (Math.floor(s / 48) + 0.5) * 48;
+  const before = middle - 42, after = middle + 42;
+  const crest = world.roadHeight(middle) - (world.roadHeight(before) + world.roadHeight(after)) / 2;
+  return Math.abs(roadBend(world, middle)) > 2.7 || crest > 0.75;
+}
+
 export function newCarState(world, station = 0) {
   const car = { x: 0, s: station, distance: 0, heading: 0, speed: 0, steering: 0 };
   joinRoad(car, world);
@@ -59,7 +72,7 @@ export function joinRoad(car, world) {
 }
 
 function alignToRoad(car, world) {
-  car.x = world.centerX(car.s);
+  car.x = world.centerX(car.s) + LANE_CENTER;
   car.heading = -world.routePose(car.s).yaw;
   car.speed = Math.max(0, car.speed);
   car.steering = 0;
@@ -69,7 +82,8 @@ export function surfaceAt(car, world, height) {
   const roadDistance = Math.abs(car.x - world.centerX(car.s));
   if (roadDistance <= ROAD_EDGE) return 'Pavement';
   if (height(car.s, car.x) < (world.waterLevel?.(car.s, car.x) ?? 0) - 0.02) return 'Shallows';
-  return roadDistance <= ROAD_EDGE + 3 ? 'Gravel' : 'Off road';
+  const turnout = (world.turnoutWidth?.(car.s) ?? 0) * Math.sign(car.x - world.centerX(car.s));
+  return roadDistance <= ROAD_EDGE + Math.max(1, turnout + 1) ? 'Gravel' : 'Off road';
 }
 
 export function groundPose(s, x, heading, height, vehicle, waterLevel = 0) {
@@ -91,7 +105,10 @@ export function groundPose(s, x, heading, height, vehicle, waterLevel = 0) {
 
 function manualStep(car, dt, input, world, vehicle, ground) {
   const speed = Math.abs(car.speed);
-  const roughness = smooth(ROAD_EDGE - 0.2, ROAD_EDGE + 4.2, Math.abs(car.x - world.centerX(car.s)));
+  const lateral = car.x - world.centerX(car.s);
+  const turnout = (world.turnoutWidth?.(car.s) ?? 0) * Math.sign(lateral);
+  const verge = Math.abs(lateral) - ROAD_EDGE;
+  const roughness = smooth(-0.2, 4.2, verge) * mix(0.46, 1, smooth(turnout - 1, turnout + 1, verge));
   const grip = mix(1, vehicle.roughGrip, roughness) * (ground.y < ground.waterLevel ? 0.59 : 1);
   const maximum = vehicle.topSpeed * mix(1, 0.29 + vehicle.roughGrip * 0.29, roughness) * (ground.y < ground.waterLevel ? 0.32 : 1);
   const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);

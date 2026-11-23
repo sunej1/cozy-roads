@@ -39,6 +39,7 @@ export function buildWater(world, id, seaReach = 14000) {
   const scanlines = Array.from({length: rows + 2}, (_, i) => world.section(id * CHUNK_LENGTH + (i - 1) * TERRAIN_STEP));
   const positions = [];
   const depth = [];
+  const banks = [];
   const indices = [];
   const flow = [];
   const segments = 12;
@@ -56,10 +57,20 @@ export function buildWater(world, id, seaReach = 14000) {
     const outlet = f && Math.abs(f.t - 0.43) < 0.70 ? f.side : 0;
     const margin = Math.min(10, (water.right - water.left) * 0.05);
     const left = water.left - margin, right = water.right + margin;
+    // Low quality estimates the reflected skyline from the land on each bank.
+    const bankReach = water.lake ? 155 : 28;
+    const west = water.left - bankReach, east = water.right + bankReach;
+    const trees = 3 + 4 * sample.trees;
+    const westHeight = Math.max(0, world.sampleTerrain(sample, west) - water.level) + trees;
+    const eastHeight = Math.max(0, world.sampleTerrain(sample, east) - water.level) + trees;
     function vertex(lateral) {
       positions.push(sample.x + lateral, water.level, -sample.s);
       depth.push(Math.max(0, water.level - world.sampleTerrain(sample, lateral)));
-      flow.push(-across * current, current);
+      banks.push(lateral > west ? Math.min(2, westHeight / (lateral - west)) : 0,
+        lateral < east ? Math.min(2, eastHeight / (east - lateral)) : 0);
+      const crossChannel = Math.min(1, Math.abs(lateral - water.center) / Math.max(1, water.width));
+      const velocity = current * (1 - 0.54 * crossChannel ** 2);
+      flow.push(-across * velocity, velocity, water.riffle * (1 - crossChannel ** 3));
     }
     // Denser samples at either shore resolve the shallow shelf on wide inlets.
     for (let j = 0; j <= segments; j++) vertex(mix(left, right, 0.5 - 0.5 * Math.cos(Math.PI * j / segments)));
@@ -89,6 +100,7 @@ export function buildWater(world, id, seaReach = 14000) {
   return indices.length ? {
     position: new Float32Array(positions),
     depth: new Float32Array(depth),
+    banks: new Float32Array(banks),
     flow: new Float32Array(flow),
     hasLake,
     index: new Uint16Array(indices),
@@ -106,7 +118,7 @@ export function buildTerrain(world, id, band = 0) {
   const normal = new Float32Array(position.length);
   const relief = new Float32Array(rows * columns * 4);
   const index = new Uint16Array((rows - 1) * (columns - 1) * 6);
-  const groundOffsets = new Float32Array(position.length);
+  const groundOffsets = new Float32Array(rows * columns * 4);
   let face = 0;
 
   for (let i = 0; i < rows; i++) {
@@ -117,9 +129,10 @@ export function buildTerrain(world, id, band = 0) {
       const vertex = i * columns + j;
       const k = vertex * 3;
       const lateral = offsets[j];
-      groundOffsets[k] = lateral;
-      groundOffsets[k + 1] = Math.max(-128, world.shoreDistance(row, lateral));
-      groundOffsets[k + 2] = row.water?.level ?? 0;
+      groundOffsets[vertex * 4] = lateral;
+      groundOffsets[vertex * 4 + 1] = Math.max(-128, world.shoreDistance(row, lateral));
+      groundOffsets[vertex * 4 + 2] = row.water?.level ?? 0;
+      groundOffsets[vertex * 4 + 3] = row.turnout;
       const y = yValues[j];
       world.reliefCoordinates(row, lateral, relief, vertex * 4);
       position[k] = row.x + lateral;

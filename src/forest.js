@@ -62,13 +62,14 @@ export const meadowRange = uniform(new THREE.Vector2(24, 56));
 export const bladeRange = uniform(new THREE.Vector2(15, 31));
 const tuftMatrix = referenceAttribute('instanceMatrix', 'mat4');
 const tuftRoot = tuftMatrix.element(3).xyz;
-export function applyMeadowWind(tracks) {
+export function applyMeadowWind(tracks, canopy) {
   const up = tuftMatrix.element(1).xyz;
+  const light = smoothstep(0.14, 0.83, canopy.coverAt(tuftRoot.xz)).mul(-0.92).add(1);
   for (const [material, range] of [[grassMaterial, meadowRange], [bladeMaterial, bladeRange], [flowerMaterial, meadowRange]]) {
     const scale = smoothstep(range.x, range.y, tuftRoot.xz.sub(meadowCenter).length()).oneMinus();
     const tip = positionGeometry.y.max(0).mul(tracks.pressure(positionLocal.xz));
     const pressed = windBend(0.5, 0.065).sub(up.mul(tip.mul(0.86))).add(vec3(tip.mul(0.22), 0, tip.mul(0.24)));
-    material.positionNode = tuftRoot.add(pressed.sub(tuftRoot).mul(scale));
+    material.positionNode = tuftRoot.add(pressed.sub(tuftRoot).mul(scale, light));
   }
 }
 
