@@ -11,7 +11,7 @@ import { SUN_DIRECTION } from './cloud-field.js';
 
 export const SUN = new THREE.Vector3(...SUN_DIRECTION).normalize();
 
-export function atmosphere(scene, visibilityAt) {
+export function atmosphere(scene, visibilityAt, cozy) {
   const far = uniform(7600);
   const ray = positionWorld.sub(cameraPosition);
   const distance = ray.length();
@@ -31,7 +31,8 @@ export function atmosphere(scene, visibilityAt) {
   const litAir = visibilityAt(cameraPosition.add(ray.mul(0.6)));
   const valley = mix(color('#64819d'), color('#eacfa6'), litAir.mul(glow.mul(0.36).add(0.56)));
   const haze = mix(mix(highAir, color('#f1d6ad'), glow.mul(0.74)), valley, lowAir.mul(0.80));
-  scene.fogNode = fog(haze, aerial.max(cover));
+  const evening = mix(color('#a29bb5'), color('#efc4a3'), litAir.mul(0.63).add(glow.mul(0.3)));
+  scene.fogNode = fog(mix(haze, evening, cozy.mul(0.72)), aerial.max(cover));
   return far;
 }
 
@@ -93,7 +94,7 @@ export function skyEnvironment() {
   return map;
 }
 
-export function makeWater(sunVisibility, bedrock) {
+export function makeWater(sunVisibility, bedrock, cozy) {
   const clock = uniform(0);
   const anchor = new THREE.Object3D();
   anchor.rotation.x = -Math.PI / 2;
@@ -132,7 +133,7 @@ export function makeWater(sunVisibility, bedrock) {
   const surfaceScatter = wave1.sin().mul(0.56).add(wave2.sin().mul(0.23)).mul(waveFalloff).mul(0.025);
   const sunlight = vec3(SUN.x, SUN.y, SUN.z);
   const glint = dot(waterNormal, sunlight.add(view).normalize()).max(0).pow(190).mul(1.12, sunVisibility);
-  const skyTint = mix(color('#759fae'), color('#e5cbb0'), dot(view.negate(), sunlight).max(0).pow(6));
+  const skyTint = mix(mix(color('#759fae'), color('#a3b4bf'), cozy), mix(color('#e5cbb0'), color('#ecc2a2'), cozy), dot(view.negate(), sunlight).max(0).pow(6));
   const distortion = vec2(ripple.x, ripple.y).mul(0.135).mul(smoothstep(0, 6, bank));
   const reflected = planar.sample(screenUV.flipX().add(distortion).clamp(0.004, 0.996)).rgb;
   // At a grazing angle one reflection texel can straddle the far bank and the sky.
@@ -255,7 +256,7 @@ export function makeBoulderMaterial(bedrock) {
   return material;
 }
 
-export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = false) {
+export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, low = false) {
   const material = new THREE.MeshStandardNodeMaterial();
   const p = positionWorld,
     nWorld = normalWorldGeometry.normalize();
@@ -266,8 +267,8 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
   const zoom = p.sub(cameraPosition).length();
   const macro = texture(mineralNoise, vec2(p.x.add(p.z.mul(0.34)), p.z.sub(p.x.mul(0.26))).mul(0.00074)).toVar();
   const meadowTint = mix(
-    color('#64763b'),
-    color('#abb361'),
+    mix(color('#64763b'), color('#788758'), cozy),
+    mix(color('#abb361'), color('#bab67e'), cozy),
     field.r.mul(0.52).add(field.g.mul(0.36), field.b.mul(0.12)),
   );
   const sod = texture(turf, p.xz.mul(0.42).add(field.rg.mul(0.18))).rgb.toVar();
@@ -286,7 +287,8 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
   const ledges = texture(bedrock, vec2(cross, strike.mul(0.76).sub(dip.mul(1.21))).mul(0.0093)).toVar();
   const face = blocks.g.mul(0.73).add(ledges.g.mul(0.27)).toVar();
   const mineral = smoothstep(0.26, 0.70, blocks.r.mul(0.65).add(macro.g.mul(0.35)));
-  const strata = mix(color('#48505a'), color('#c1ad92'), mineral);
+  const strata = mix(mix(color('#48505a'), color('#726d7a'), cozy),
+    mix(color('#c1ad92'), color('#c7ac96'), cozy), mineral);
   const recess = smoothstep(0.24, 0.67, face.add(residual.z.mul(0.0028)));
   const stone = strata.mul(blocks.r.mul(0.86).add(ledges.r.mul(0.49), outcrop.r.mul(0.48), 0.31),
     recess.mul(0.48).add(0.63));
@@ -328,7 +330,7 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
   const cliffRelief = blocks.g.mul(32).add(ledges.g.mul(6.5)).mul(exposed);
   const detail = low ? float(0) : crag.mul(exposed).add(grain.b.mul(near, 0.038),
     sod.g.mul(near, exposed.oneMinus(), 0.032), gravel.mul(shoulder, 0.03));
-  const relief = cliffRelief.add(detail).mul(snow.mul(-0.95).add(1)).toVar();
+  const relief = cliffRelief.add(detail).mul(snow.mul(-0.95).add(1), cozy.mul(-0.32).add(1)).toVar();
   const n = normalViewGeometry.normalize();
   const dx = positionView.dFdx();
   const dy = positionView.dFdy();

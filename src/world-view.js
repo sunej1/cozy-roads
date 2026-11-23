@@ -1,4 +1,4 @@
-import { cameraPosition, diffuseColor, dot, luminance, mix as mixColor, positionWorld, shadow, smoothstep, texture, vec3 } from 'three/tsl';
+import { cameraPosition, color, diffuseColor, dot, luminance, mix as mixColor, positionWorld, shadow, smoothstep, texture, uniform, vec3 } from 'three/tsl';
 import { mountainLight } from './mountain-light.js';
 import { canopyShade } from './canopy-shade.js';
 import { GrassTracks } from './grass-tracks.js';
@@ -344,9 +344,10 @@ export class WorldView {
     this.tracks = new GrassTracks();
     applyMeadowWind(this.tracks);
     this.meadow = new Meadow(scene, world, (s,x) => this.surfaceHeight(s,x), assets.leafLevels, camera.position);
+    this.cozy = uniform(1);
     const reliefMap = makeReliefTexture(assets.elevations);
-    this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks);
-    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, true);
+    this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy);
+    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy, true);
     this.canopy = canopyShade();
     for (const material of [this.terrainMaterial, this.lowTerrainMaterial, bladeMaterial, grassMaterial, flowerMaterial, understoryMaterial]) {
       material.aoNode = this.canopy.ambient;
@@ -368,19 +369,24 @@ export class WorldView {
     scene.environment = skyEnvironment();
     scene.environmentIntensity = 0.48;
 
-    const skyLight = new THREE.HemisphereLight('#c2d9f6', '#8a805b', 0.82);
+    this.skyLight = new THREE.HemisphereLight('#c2d9f6', '#8a805b', 0.82);
     this.sun = new THREE.DirectionalLight('#ffdfb0', 4.45);
     this.sun.position.copy(SUN).multiplyScalar(125);
     this.sun.castShadow = true;
     this.clouds = cloudLayer(this.sky, SUN, assets.clouds);
+    const elevation = positionWorld.sub(cameraPosition).normalize().y;
+    const horizonTint = mixColor(color('#f2bda3'), color('#acbfdc'), smoothstep(0.01, 0.54, elevation));
+    const cloudlight = this.sky.material.colorNode;
+    this.sky.material.colorNode = mixColor(cloudlight.rgb, cloudlight.rgb.mul(0.46).add(horizonTint.mul(0.75)),
+      this.cozy.mul(0.78));
     this.mountainLight = mountainLight(world, SUN);
     const sunlight = this.mountainLight.visibility.mul(this.clouds.shadow);
-    this.far = atmosphere(scene, this.mountainLight.visibilityAt);
+    this.far = atmosphere(scene, this.mountainLight.visibilityAt, this.cozy);
     const backlight = dot(positionWorld.sub(cameraPosition).normalize(), vec3(...SUN.toArray())).max(0).pow(3);
     for (const material of [grassMaterial, bladeMaterial, flowerMaterial, aspenMaterial]) {
       material.emissiveNode = diffuseColor.rgb.mul(backlight.mul(sunlight, 0.53).add(0.19));
     }
-    this.water = makeWater(sunlight, assets.bedrock);
+    this.water = makeWater(sunlight, assets.bedrock, this.cozy);
     // The half-resolution lake keeps the meadow clumps. Individual blades only resolve in the main view.
     camera.layers.enable(MEADOW_DETAIL_LAYER);
     this.water.reflector.getVirtualCamera(camera).layers.disable(MEADOW_DETAIL_LAYER);
@@ -396,7 +402,7 @@ export class WorldView {
     this.sun.shadow.normalBias = 0.068;
     this.sun.shadow.bias = -0.00022;
     this.sun.shadow.radius = 2.12;
-    scene.add(this.sky, this.water.anchor, skyLight, this.lowSun, this.sun, this.sun.target);
+    scene.add(this.sky, this.water.anchor, this.skyLight, this.lowSun, this.sun, this.sun.target);
   }
 
   build(id, band, tile) {
@@ -551,6 +557,16 @@ export class WorldView {
       trees.count = low ? Math.floor(treeCount * 0.69) : treeCount;
       shrubs.visible = !low && shrubs.count > 0 && near;
     }
+  }
+
+  setLook(cozy) {
+    this.cozy.value = cozy ? 1 : 0;
+    this.skyLight.color.set(cozy ? '#e6d7ee' : '#c2d9f6');
+    this.skyLight.groundColor.set(cozy ? '#ada086' : '#8a805b');
+    this.skyLight.intensity = cozy ? 1.14 : 0.82;
+    this.sun.color.set(cozy ? '#ffdbad' : '#ffdfb0');
+    this.lowSun.color.copy(this.sun.color);
+    this.sun.intensity = this.lowSun.intensity = cozy ? 3.7 : 4.45;
   }
 
   setQuality(low) {

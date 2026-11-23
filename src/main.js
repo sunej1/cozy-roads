@@ -15,7 +15,7 @@ const canvas = element('view');
 let world;
 const ui = Object.fromEntries([
   'intro', 'intro-title', 'intro-description', 'start', 'auto', 'restart', 'new-world', 'pause', 'vehicle', 'vehicle-description',
-  'performance-toggle', 'performance', 'quality', 'resolution', 'fps', 'median', 'p95',
+  'performance-toggle', 'performance', 'quality', 'look', 'resolution', 'fps', 'median', 'p95',
   'graph', 'benchmark-status', 'benchmark', 'export', 'distance', 'biome', 'surface', 'seed', 'reverse', 'speed', 'touch',
 ].map(id => [id, element(id)]));
 const graph = ui.graph.getContext('2d');
@@ -225,6 +225,12 @@ function poseScene(blend) {
   }
   cameraTarget.lerp(desiredTarget, blend);
   camera.lookAt(cameraTarget);
+}
+
+function applyLook() {
+  document.body.dataset.look = ui.look.value;
+  landscape.setLook(ui.look.value === 'cozy');
+  needsRender = true;
 }
 
 function applyQuality() {
@@ -470,6 +476,10 @@ function bindControls() {
   });
   ui.pause.addEventListener('click', pauseDrive);
   ui.quality.addEventListener('change', applyQuality);
+  ui.look.addEventListener('change', () => {
+    applyLook();
+    try { localStorage.setItem('cozy-roads-look', ui.look.value); } catch {}
+  });
   ui.benchmark.addEventListener('click', startBenchmark);
   ui.export.addEventListener('click', exportResult);
   ui['performance-toggle'].addEventListener('click', () => {
@@ -535,6 +545,8 @@ async function initialize() {
   renderer.shadowMap.enabled = true;
   landscape = new WorldView(scene, assets, world, camera);
   ui.seed.textContent = 'World seed ' + world.seed;
+  try { if (localStorage.getItem('cozy-roads-look') === 'classic') ui.look.value = 'classic'; } catch {}
+  applyLook();
   chooseVehicle(selectedVehicle, false);
   applyQuality();
   mode = 'ready';

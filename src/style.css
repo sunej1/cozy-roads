@@ -176,3 +176,20 @@ kbd {
 .garage #vehicle-description { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.9rem; }
 #surface { color: var(--muted); font-size: 0.79rem; }
 #reverse { color: var(--accent); font-weight: 650; }
+
+.garage select + label { margin-left: .8rem; }
+.garage #look { min-width: 6rem; }
+body[data-look="cozy"] {
+  --accent: #f3d4a8;
+  --muted: #e0d8cf;
+  --panel: #31352ff2;
+}
+body[data-look="cozy"] .primary { color: #403326; }
+body[data-look="cozy"] .hud-button,
+body[data-look="cozy"] .text-button { background-color: #353a33ce; }
+@media (max-width: 500px) {
+  .garage { display: grid; grid-template-columns: auto 1fr; gap: .3rem; align-items: center; }
+  .garage select + label { margin-left: 0; }
+  .garage #vehicle-description { grid-column: 1 / -1; }
+  .garage select { justify-self: start; margin-bottom: 0; }
+}
