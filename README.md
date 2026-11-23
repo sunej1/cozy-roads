@@ -1,6 +1,6 @@
 # Cozy Roads
 
-A Three.js driving game. **The Open Road** keeps generating a road through lake basins, pine forests, river valleys, and alpine mountains as you drive. [Play Cozy Roads](https://edwardjsun.com/cozy-roads/)
+A Three.js driving game. **The Open Road** keeps generating a road through lake basins, pine forests, river valleys, and alpine mountains as you drive. [Play Cozy Roads](https://sunej1.github.io/cozy-roads/)
 
 ## Run locally
 
