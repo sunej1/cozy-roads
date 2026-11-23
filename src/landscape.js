@@ -98,7 +98,7 @@ export function makeWater(sunVisibility, bedrock, cozy) {
   const clock = uniform(0);
   const anchor = new THREE.Object3D();
   anchor.rotation.x = -Math.PI / 2;
-  const planar = reflector({ target: anchor, resolutionScale: 0.50, generateMipmaps: true, bounces: false, samples: 0 });
+  const planar = reflector({ target: anchor, resolutionScale: 0.50, bounces: false, samples: 0 });
   const flow = attribute('flow', 'vec2');
   const p = positionWorld.xz;
   // Crossfade two short drifts so bends never stretch the ripples over a long drive.
@@ -133,14 +133,15 @@ export function makeWater(sunVisibility, bedrock, cozy) {
   const glint = dot(waterNormal, sunlight.add(view).normalize()).max(0).pow(155).mul(0.64, sunVisibility);
   const skyTint = mix(mix(color('#759fae'), color('#a3b4bf'), cozy), mix(color('#e5cbb0'), color('#ecc2a2'), cozy), dot(view.negate(), sunlight).max(0).pow(6));
   const distortion = disturbance.mul(0.061, smoothstep(0, 2.5, depth));
-  const reflected = planar.sample(screenUV.flipX().add(distortion).clamp(0.004, 0.996))
-    .level(smoothstep(5, 190, distance).mul(1.8).add(0.6)).rgb;
+  const reflected = planar.sample(screenUV.flipX().add(distortion).clamp(0.004, 0.996)).rgb;
+  // A grazing reflection can sample the clipped sky behind the far bank.
+  const bankCoverage = smoothstep(0, depth.fwidth().mul(2).add(0.35), depth);
   const riffles = smoothstep(0.65, 0.83, eddies.y).mul(eddies.x, current, smoothstep(0.1, 1.8, depth).oneMinus(), waveFalloff, 0.16);
   const material = new THREE.MeshBasicNodeMaterial();
   const lowMaterial = new THREE.MeshBasicNodeMaterial();
   for (const [surface, reflection] of [[material, reflected], [lowMaterial, skyTint]]) {
     surface.userData.waterReflection = 0.36;
-    surface.colorNode = mix(body, mix(reflection, skyTint, current), fresnel)
+    surface.colorNode = mix(body, mix(reflection, skyTint, current), fresnel.mul(bankCoverage))
       .add(color('#ffdfb4').mul(glint), color('#bbc4bb').mul(riffles));
   }
 
