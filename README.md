@@ -23,7 +23,7 @@ The **Look** selector on the start and pause screens switches between **Cozy** (
 
 ## Vehicles
 
-Select a vehicle on the start or pause screen. The **Wayfarer** family wagon feels predictable on gravel. **Redline 92** is a retro coupe with quick turn-in. **Vela** pulls hardest on pavement but loses more traction on rough ground. The **Ridgeline 4×4** keeps climbing on steeper slopes and can cross deeper shallows. Deep water limits each vehicle's progress.
+Select a vehicle on the start or pause screen. The **Wayfarer** family wagon feels predictable on gravel. **Redline 92** is a retro coupe with quick turn-in. **Vela** pulls hardest on pavement but loses more traction on rough ground. The **Ridgeline 4×4** keeps climbing on steeper slopes and can cross deeper shallows. Entering water deeper than the vehicle can ford returns it to the nearby road and preserves the trip distance.
 
 ## Measure a drive
 

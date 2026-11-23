@@ -51,7 +51,7 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     const width = 100 + random() * 49;
     feature = {
       ...BIOMES[biome],
-      ...(fjord && { name: 'Fjords', grade: 27, ridge: 165, trees: 0.48 }),
+      ...(fjord && { name: 'Fjords', grade: 21, ridge: 148, trees: 0.48 }),
       index,
       lake: biome === 0 ? {
         side,
@@ -116,14 +116,14 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     // The glacial trough bends past a narrow headland before opening into a deep outer sound.
     const mouth = smooth(-0.24, 0.56, t);
     const lakeWidth = lake.fjord
-      ? 102 + 228 * mouth + Math.sin(6 * t + lake.phase) * 17
+      ? 106 + 196 * mouth + 22 * Math.sin(4.6 * t + lake.phase)
       : lake.width * (1 + 0.12 * Math.sin(t * 5.8 + lake.phase));
     const lakeX = lake.fjord
-      ? lake.side * (lakeWidth + 32 + 18 * Math.sin(t * 4 + lake.phase))
+      ? lake.side * (lakeWidth + 47 + 22 * Math.sin(t * 5.2 + lake.phase) + 13 * Math.cos(t * 8.1 - lake.phase))
       : lake.lateral + Math.sin(t * 4.2 + lake.phase) * 9;
     const lakes = fromShore < 80 ? [{ s: lake.s, lateral: lakeX, width: lakeWidth, t, edgeScale: lakeWidth }] : [];
     const fjord = lake.fjord && fromShore < 200 ? {
-      side: lake.side, t, center: lakeX, width: lakeWidth, length: lake.length,
+      side: lake.side, t, center: lakeX, length: lake.length, phase: lake.phase,
       weight: 1 - smooth(0, 200, fromShore),
     } : null;
     const openWidth = lakeWidth * Math.sqrt(Math.max(0, 1 - t * t));
@@ -166,10 +166,12 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
   }
 
   function outletShore(fjord, lateral) {
-    if (!fjord || Math.abs(fjord.t - 0.43) >= 0.42) return -Infinity;
+    if (!fjord) return -Infinity;
     const across = fjord.side * (lateral - fjord.center);
-    const halfWidth = fjord.length * (0.082 + 0.22 * smooth(fjord.width, 1900, across));
-    return Math.min(across, halfWidth - Math.abs(fjord.t - 0.43) * fjord.length);
+    const bend = smooth(0, 1450, across);
+    const axis = 0.22 + 0.36 * bend + 0.115 * Math.sin(across / 580 + fjord.phase) + 0.07 * bend * Math.sin(across / 230 - fjord.phase);
+    const halfWidth = 0.13 + 0.15 * bend;
+    return Math.min(across, (halfWidth - Math.abs(fjord.t - axis)) * fjord.length);
   }
 
   function shoreDistance(row, lateral) {
@@ -192,10 +194,13 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
 
   function bankHeight(row, lateral, base, gravel) {
     const shore = shoreDistance(row, lateral);
-    const bankRun = 42 + Math.abs(row.water?.flow ?? 0) * row.grade;
+    const tidal = row.fjord?.weight ?? 0;
+    // Give high headlands a long footslope instead of dropping the whole massif at the waterline.
+    const bankRun = 42 + Math.abs(row.water?.flow ?? 0) * row.grade
+      + tidal * Math.min(530, Math.max(0, base) * 1.6);
     if (shore < -bankRun) return base;
     const level = row.water?.level ?? 0;
-    const depth = (25 + 64 * (row.fjord?.weight ?? 0)) * smooth(0, 92, shore) + 1.05 * smooth(0, 7, shore);
+    const depth = (25 + 54 * tidal) * smooth(0, 92 + 36 * tidal, shore) + 1.05 * smooth(0, 9, shore);
     // The shoulder stays attached to the road even when an irregular bank approaches it.
     const beach = smooth(0, bankRun, -shore);
     const bank = level + Math.max(1.5, base - level) * beach - depth;
@@ -235,16 +240,7 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
       + range * cracks * mix(9, 32, rugged);
     const floodplain = row.grade + gravel * (hummock * 2 + surface * 0.35);
     const foothills = mix(inner, floodplain, row.valley * (1 - smooth(118, 410, distance)));
-    let base = outer > 0 ? mix(foothills, mountains.height(x, s), outer) : foothills;
-    if (row.fjord) {
-      const f = row.fjord;
-      const halfWidth = f.width * Math.sqrt(Math.max(0, 1 - f.t * f.t));
-      const seaward = f.side * (lateral - f.center);
-      const wall = Math.abs(seaward) - halfWidth;
-      const cliff = smooth(5, 122, wall) * (1 - smooth(280, 825, wall));
-      const face = 143 + 85 * fold + 52 * cracks + 45 * valley;
-      base += f.weight * cliff * face * smooth(8, 104, distance) * (1 - outer);
-    }
+    const base = outer > 0 ? mix(foothills, mountains.height(x, s), outer) : foothills;
     return bankHeight(row, lateral, base, gravel);
   }
 

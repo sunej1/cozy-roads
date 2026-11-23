@@ -45,7 +45,8 @@ export class Meadow {
         ds = this.height(s + 0.8, x) - y;
       const grade = Math.hypot(dx, ds) / 0.8;
       const cover = noise(x / 17, s / 21);
-      if (grade > 1.18 || random() < 0.035 + 0.63 * smooth(145, 220, y) + 0.16 * (1 - cover)) continue;
+      const bare = 1 - 1 / Math.hypot(1, grade) + 0.23 * smooth(145, 510, y) + (0.5 - cover) * 0.34;
+      if (random() < 0.035 + 0.16 * (1 - cover) + 0.99 * smooth(0.10, 0.43, bare)) continue;
       tuft.position.set(x, y - 0.018, -s);
       tuft.rotation.set(Math.atan2(ds, 0.8), random() * Math.PI * 2, Math.atan2(dx, 0.8), 'ZXY');
       const pasture = smooth(0.30, 0.73, noise(x / 36 + 51, s / 42 - 23));

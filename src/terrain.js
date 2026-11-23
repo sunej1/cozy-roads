@@ -38,7 +38,7 @@ const rows = CHUNK_LENGTH / TERRAIN_STEP + 1;
 export function buildWater(world, id, seaReach = 14000) {
   const scanlines = Array.from({length: rows + 2}, (_, i) => world.section(id * CHUNK_LENGTH + (i - 1) * TERRAIN_STEP));
   const positions = [];
-  const shore = [];
+  const depth = [];
   const indices = [];
   const flow = [];
   const segments = 12;
@@ -52,28 +52,43 @@ export function buildWater(world, id, seaReach = 14000) {
       - before.x - (before.water?.center ?? water.center)) / (2 * TERRAIN_STEP);
     const current = water.flow / Math.hypot(1, across);
     const f = sample.fjord;
-    const outlet = f && Math.abs(f.t - 0.43) < 0.42 ? f.side : 0;
-    for (let j = -1; j <= segments + 1; j++) {
-      let lateral = mix(water.left - 10, water.right + 10, Math.min(1, Math.max(0, j / segments)));
-      if (j === -1 && outlet < 0) lateral = -seaReach;
-      if (j === segments + 1 && outlet > 0) lateral = seaReach;
+    // Surround the whole curved outlet. The terrain occludes the dry parts of the strip.
+    const outlet = f && Math.abs(f.t - 0.43) < 0.70 ? f.side : 0;
+    const margin = Math.min(10, (water.right - water.left) * 0.05);
+    const left = water.left - margin, right = water.right + margin;
+    function vertex(lateral) {
       positions.push(sample.x + lateral, water.level, -sample.s);
-      shore.push(world.shoreDistance(sample, lateral));
+      depth.push(Math.max(0, water.level - world.sampleTerrain(sample, lateral)));
       flow.push(-across * current, current);
     }
+    // Denser samples at either shore resolve the shallow shelf on wide inlets.
+    for (let j = 0; j <= segments; j++) vertex(mix(left, right, 0.5 - 0.5 * Math.cos(Math.PI * j / segments)));
+    if (outlet) {
+      const bank = outlet < 0 ? left : right;
+      for (const span of [80, 240, 650, 1600, 4000]) vertex(bank + outlet * span);
+      vertex(outlet * seaReach);
+    }
     if (previous?.basin === water.basin) {
-      for (let j = 0; j < segments + 2; j++) {
-        const a = previous.start + j, b = start + j;
-        indices.push(a, a + 1, b, a + 1, b + 1, b);
+      const quad = (a, b, c, d) => indices.push(a, b, c, b, d, c);
+      for (let j = 0; j < segments; j++) {
+        quad(previous.start + j, previous.start + j + 1, start + j, start + j + 1);
+      }
+      if (outlet && outlet === previous.outlet) {
+        let edge = outlet < 0 ? 0 : segments;
+        for (let j = segments + 1; j < positions.length / 3 - start; j++) {
+          const west = outlet < 0 ? j : edge, east = outlet < 0 ? edge : j;
+          quad(previous.start + west, previous.start + east, start + west, start + east);
+          edge = j;
+        }
       }
     }
-    previous = { start, basin: water.basin };
+    previous = { start, basin: water.basin, outlet };
     hasLake ||= water.lake;
   }
 
   return indices.length ? {
     position: new Float32Array(positions),
-    shore: new Float32Array(shore),
+    depth: new Float32Array(depth),
     flow: new Float32Array(flow),
     hasLake,
     index: new Uint16Array(indices),

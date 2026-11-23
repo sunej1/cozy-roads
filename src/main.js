@@ -46,6 +46,7 @@ let benchmark = null;
 let result = null;
 let previousTime = null;
 let nextUi = 0;
+let recoveryMessageUntil = 0;
 let accumulator = 0;
 let wheelTurn = 0;
 let needsRender = true;
@@ -72,6 +73,7 @@ function resetTime() {
 }
 
 function setMode(next) {
+  recoveryMessageUntil = 0;
   mode = next;
   needsRender = true;
   resetTime();
@@ -162,7 +164,6 @@ function poseScene(blend) {
   const vehicle = VEHICLES[selectedVehicle];
   const forwardX = Math.sin(heading);
   const forwardS = Math.cos(heading);
-  const y = height(s, x);
   const ground = groundPose(s, x, heading, height, vehicle, world.waterLevel(s, x));
   const lift = mix(previousPose.clearance ?? 0, car.clearance, alpha);
   const extension = mix(previousPose.extension ?? 0, car.extension, alpha);
@@ -183,6 +184,7 @@ function poseScene(blend) {
     wheel.rotation.x = -mix(previousPose.wheelTurn ?? wheelTurn, wheelTurn, alpha);
   }
 
+  const y = model.root.position.y;
   if (mode === 'ready' || automatic) {
     const intro = mode === 'ready';
     const lookAhead = intro ? 34 : 17;
@@ -221,7 +223,8 @@ function poseScene(blend) {
   lastAnchor.set(x, s);
   camera.position.lerp(desiredCamera, blend);
   if (mode !== 'ready' && !automatic) {
-    camera.position.y = Math.max(camera.position.y, height(-camera.position.z, camera.position.x) + 1.2);
+    camera.position.y = Math.max(camera.position.y, height(-camera.position.z, camera.position.x) + 1.2,
+      world.waterLevel(-camera.position.z, camera.position.x) + 0.7);
   }
   cameraTarget.lerp(desiredTarget, blend);
   camera.lookAt(cameraTarget);
@@ -306,7 +309,7 @@ function drawGraph(values) {
 function updateHud() {
   ui.distance.textContent = (car.distance / 1000).toFixed(2) + ' km';
   ui.biome.textContent = world.biomeAt(car.s).name;
-  ui.surface.textContent = surfaceAt(car, world, height);
+  ui.surface.textContent = performance.now() < recoveryMessageUntil ? 'Deep water · Back on road' : surfaceAt(car, world, height);
   ui.reverse.hidden = car.speed >= -0.15;
   ui.speed.textContent = String(Math.round(Math.abs(car.speed) * 3.6)).padStart(2, '0');
   if (ui.performance.hidden) return;
@@ -406,7 +409,11 @@ function advance(seconds) {
   while (accumulator + 1e-9 >= STEP) {
     Object.assign(previousPose, car);
     previousPose.wheelTurn = wheelTurn;
-    drive(car, STEP, input, automatic, world, height, VEHICLES[selectedVehicle]);
+    if (drive(car, STEP, input, automatic, world, height, VEHICLES[selectedVehicle]) === 'deep-water') {
+      Object.assign(previousPose, car);
+      poseScene(1);
+      recoveryMessageUntil = performance.now() + 3000;
+    }
     wheelTurn += car.speed * STEP / VEHICLES[selectedVehicle].radius;
     accumulator -= STEP;
   }

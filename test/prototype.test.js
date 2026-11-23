@@ -77,13 +77,17 @@ test('terrain tiles match across boundaries regardless of build order', () => {
   }
   const lake = buildWater(world, 0);
   assert.ok(lake?.index.length > 0);
-  assert.ok(lake.shore.some(value => value > 0));
+  assert.ok(lake.depth.some(value => value === 0) && lake.depth.some(value => value > 15));
+  for (const [i, depth] of lake.depth.entries()) {
+    const x = lake.position[i * 3], level = lake.position[i * 3 + 1], s = -lake.position[i * 3 + 2];
+    assert.ok(Math.abs(depth - Math.max(0, level - world.terrainHeight(s, x - world.centerX(s)))) < 0.001);
+  }
   const river = buildWater(world, 6);
   assert.equal(river.hasLake, false);
   assert.equal(lake.hasLake, true);
   assert.ok(river.flow.some(value => value > 0.5));
   const next = buildWater(world, 7);
-  for (const [field, stride] of [['position', 45], ['flow', 30], ['shore', 15]]) {
+  for (const [field, stride] of [['position', 39], ['flow', 26], ['depth', 13]]) {
     assert.deepEqual(river[field].slice(-stride), next[field].slice(0, stride));
   }
 });
@@ -432,17 +436,21 @@ test('bedrock shaping preserves flat elevations and changes the surveyed cliff r
   assert.ok(incised > 1000 && raised > 1000);
 });
 
-test('a narrow flooded ditch can be cleared in the air while deep water stops the tires', () => {
+test('a car can clear a flooded ditch and recovers if it lands in deep water', () => {
   const world = { centerX: () => 0, routePose: () => ({ length: 1, yaw: 0 }) };
   const vehicle = VEHICLES.trail;
   const water = s => s <= 0 || s >= 3 ? 0.25 : -3;
   const jump = { ...newCarState(world), s: -1, speed: 12, pitch: 0, clearance: 1.5, verticalSpeed: 1 };
   for (let i = 0; i < 55; i++) drive(jump, 1 / 120, {}, false, world, water, vehicle);
   assert.ok(jump.s > 3 && jump.speed > 10);
-  const coast = { ...newCarState(world), s: -4, speed: 4 };
-  for (let i = 0; i < 1200; i++) drive(coast, 1 / 120, { throttle: true }, false, world, s => 1 - Math.max(0, s) * 0.10, vehicle);
-  assert.ok(coast.s > 10 * (1 + vehicle.ford) - 0.15 && coast.s <= 10 * (1 + vehicle.ford));
-  assert.equal(coast.speed, 0);
+  const falling = { ...newCarState(world), x: 20, clearance: 2, pitch: 0 };
+  const basin = (s, x) => x > 10 ? -12 : 3;
+  assert.equal(drive(falling, 1 / 120, {}, false, world, basin, vehicle), undefined);
+  let recovery;
+  for (let i = 0; i < 180 && !recovery; i++) recovery = drive(falling, 1 / 120, {}, false, world, basin, vehicle);
+  assert.equal(recovery, 'deep-water');
+  assert.equal(falling.x, 0);
+  assert.equal(falling.clearance, 0);
 });
 
 test('seeded rivers run downhill into lakes on either side of a divide and keep the roadway dry', () => {
@@ -490,7 +498,7 @@ test('trail suspension absorbs small crests and preserves takeoff pitch over a d
   assert.equal(car.clearance, 0);
 });
 
-test('river valleys have a broad floor and vehicles stop at their ford depth above sea level', () => {
+test('river valleys have a broad floor', () => {
   const world = createWorld();
   const s = 1840, row = world.section(s);
   assert.equal(world.biomeAt(s).name, 'River valley');
@@ -498,14 +506,32 @@ test('river valleys have a broad floor and vehicles stop at their ford depth abo
   const floor = [25, 50, 75, 100].map(offset => world.sampleTerrain(row, drySide * offset));
   assert.ok(Math.max(...floor) - Math.min(...floor) < 2);
   assert.ok(world.sampleTerrain(row, 1700) > Math.max(...floor) + 100);
+});
 
-  const id = Math.floor(s / CHUNK_LENGTH), tile = buildTerrain(world, id);
-  const height = (station, x) => tileSurface(tile, id, station, x);
-  const car = { ...newCarState(world), s, x: row.x, heading: Math.sign(row.water.center) * Math.PI / 2 };
-  for (let i = 0; i < 1800; i++) drive(car, 1 / 120, { throttle: true }, false, world, height, VEHICLES.trail);
-  const depth = world.waterLevel(car.s, car.x) - height(car.s, car.x);
-  assert.ok(height(car.s, car.x) > 0 && depth > VEHICLES.trail.ford - 0.05 && depth <= VEHICLES.trail.ford);
-  assert.equal(car.speed, 0);
+test('every car can ford shallows and drive away after deep water at lake, river and fjord shores', () => {
+  const world = createWorld();
+  for (const s of [0, 1840, 2800]) {
+    const row = world.section(s), id = Math.floor(s / CHUNK_LENGTH), tile = buildTerrain(world, id);
+    const height = (station, x) => tileSurface(tile, id, station, x);
+    for (const vehicle of Object.values(VEHICLES)) {
+      const car = newCarState(world, s);
+      car.heading = Math.sign(row.water.center) * Math.PI / 2;
+      let recovery, waded = false;
+      for (let i = 0; i < 2400 && !recovery; i++) {
+        recovery = drive(car, 1 / 120, { throttle: true }, false, world, height, vehicle);
+        const depth = world.waterLevel(car.s, car.x) - height(car.s, car.x);
+        waded ||= depth > 0 && depth <= vehicle.ford && car.speed > 0;
+      }
+      assert.ok(waded);
+      assert.equal(recovery, 'deep-water');
+      assert.equal(car.x, world.centerX(car.s));
+      assert.equal(car.speed, 0);
+      const distance = car.distance;
+      assert.ok(distance > 10);
+      for (let i = 0; i < 120; i++) drive(car, 1 / 120, { throttle: true }, false, world, height, vehicle);
+      assert.ok(car.distance > distance + 1 && car.speed > 1);
+    }
+  }
 });
 
 test('random departures start on pavement with a fresh trip meter and pinned starts replay', () => {
@@ -524,7 +550,7 @@ test('random departures start on pavement with a fresh trip meter and pinned sta
   assert.equal(spawnStation('?start=NaN', () => 0), sample[0]);
 });
 
-test('fjords have a deep tidal trough, a widening outer sound and steep walls', () => {
+test('fjords have a deep tidal trough, a winding outlet, a widening sound and sloping shores', () => {
   for (const seed of [0, DEFAULT_SEED, 4294967295]) {
     const world = createWorld(seed);
     for (const group of [-3, -1, 1, 3]) {
@@ -533,17 +559,28 @@ test('fjords have a deep tidal trough, a widening outer sound and steep walls', 
       const inner = world.section(inlet.s - 0.37 * inlet.length);
       const outer = world.section(inlet.s + 0.66 * inlet.length);
       assert.ok(outer.water.right - outer.water.left > 1.8 * (inner.water.right - inner.water.left));
-      const mouth = world.section(inlet.s + 0.43 * inlet.length);
-      for (const lateral of [450, 950, 1710, 4000, 8000]) {
-        assert.ok(world.sampleTerrain(mouth, inlet.side * lateral) < -1, 'navigable connection to the sea');
+      const mouth = world.section(inlet.s + 0.38 * inlet.length);
+      // Follow the submerged channel seawards. Neighboring sections must overlap at depth.
+      let last = null;
+      for (const lateral of [420, 510, 620, 770, 950, 1200, 1450, 1710, 2000, 2400, 3200, 4000, 8000]) {
+        const wet = new Set();
+        for (let t = 0; t <= 100; t += 2) {
+          const row = world.section(inlet.s + t / 100 * inlet.length);
+          if (world.sampleTerrain(row, inlet.side * lateral) < -1) wet.add(t);
+        }
+        assert.ok(wet.size > 3 && (!last || [...last].some(t => wet.has(t))), 'continuous tidal channel');
+        last = wet;
       }
       const sea = buildWater(world, Math.floor(mouth.s / CHUNK_LENGTH));
       assert.ok(sea.position.some((v, i) => i % 3 === 0 && v * inlet.side > 9000));
       for (const row of [inner, outer]) {
         assert.equal(row.water.level, 0);
-        assert.ok(world.sampleTerrain(row, row.fjord.center) < -55);
+        assert.ok(world.sampleTerrain(row, row.fjord.center) < (row === outer ? -60 : -25));
         const bank = inlet.side > 0 ? row.water.right : row.water.left;
-        assert.ok(world.sampleTerrain(row, bank + inlet.side * 145) > 100);
+        const shelf = world.sampleTerrain(row, bank + inlet.side * 25);
+        assert.ok(shelf >= 0 && shelf < 15);
+        assert.ok(world.sampleTerrain(row, bank + inlet.side * 80) > shelf + 8);
+        if (row === inner) assert.ok(world.sampleTerrain(row, bank + inlet.side * 400) > 95);
         assert.ok(world.shoreDistance(row, 0) < -ROAD_EDGE);
       }
     }

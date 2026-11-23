@@ -472,7 +472,7 @@ export class WorldView {
         const surface = new THREE.BufferGeometry();
         surface.setAttribute('position', new THREE.BufferAttribute(data.position, 3));
         surface.setAttribute('flow', new THREE.BufferAttribute(data.flow, 2));
-        surface.setAttribute('shore', new THREE.BufferAttribute(data.shore, 1));
+        surface.setAttribute('waterDepth', new THREE.BufferAttribute(data.depth, 1));
         surface.setIndex(new THREE.BufferAttribute(data.index, 1));
         surface.computeVertexNormals();
         mesh = new THREE.Mesh(surface, this.low || !data.hasLake ? this.water.lowMaterial : this.water.material);

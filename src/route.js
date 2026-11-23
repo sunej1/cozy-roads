@@ -75,12 +75,13 @@ export function surfaceAt(car, world, height) {
 export function groundPose(s, x, heading, height, vehicle, waterLevel = 0) {
   const fx = Math.sin(heading), fs = Math.cos(heading);
   const axle = vehicle.wheelbase * 0.5, side = vehicle.width * 0.46;
-  const wheel = (along, across) => height(s + fs * along - fx * across, x + fx * along + fs * across);
+  const wheel = (along, across) => Math.max(waterLevel - vehicle.ford,
+    height(s + fs * along - fx * across, x + fx * along + fs * across));
   const fl = wheel(axle, -side), fr = wheel(axle, side);
   const rl = wheel(-axle, -side), rr = wheel(-axle, side);
   const grade = (fl + fr - rl - rr) / (2 * vehicle.wheelbase);
   return {
-    y: Math.max(waterLevel - vehicle.ford, (fl + fr + rl + rr) * 0.25),
+    y: (fl + fr + rl + rr) * 0.25,
     pitch: clamp(Math.atan(grade), -0.78, 0.78),
     roll: clamp(Math.atan2(fr + rr - fl - rl, 4 * side), -0.68, 0.68),
     waterLevel,
@@ -88,7 +89,7 @@ export function groundPose(s, x, heading, height, vehicle, waterLevel = 0) {
   };
 }
 
-function manualStep(car, dt, input, world, height, vehicle, ground) {
+function manualStep(car, dt, input, world, vehicle, ground) {
   const speed = Math.abs(car.speed);
   const roughness = smooth(ROAD_EDGE - 0.2, ROAD_EDGE + 4.2, Math.abs(car.x - world.centerX(car.s)));
   const grip = mix(1, vehicle.roughGrip, roughness) * (ground.y < ground.waterLevel ? 0.59 : 1);
@@ -117,16 +118,8 @@ function manualStep(car, dt, input, world, height, vehicle, ground) {
   }
 
   const step = car.speed * dt / (car.clearance > 0 ? 1 : Math.hypot(1, ground.grade));
-  const nextX = car.x + Math.sin(car.heading) * step, nextS = car.s + Math.cos(car.heading) * step;
-  const nextHeight = height(nextS, nextX);
-  const level = world.waterLevel?.(nextS, nextX) ?? 0;
-  const aboveWater = car.clearance > 0 && ground.y + car.extension + car.clearance > level;
-  if (!aboveWater && nextHeight < level - vehicle.ford && nextHeight < height(car.s, car.x)) {
-    car.speed = 0;
-    return;
-  }
-  car.x = nextX;
-  car.s = nextS;
+  car.x += Math.sin(car.heading) * step;
+  car.s += Math.cos(car.heading) * step;
   car.distance += Math.abs(step);
 }
 
@@ -140,7 +133,7 @@ export function drive(car, dt, input, automatic, world, height, vehicle) {
     car.distance += car.speed * dt;
     alignToRoad(car, world);
   } else {
-    manualStep(car, dt, input, world, height, vehicle, ground);
+    manualStep(car, dt, input, world, vehicle, ground);
   }
 
   const next = groundPose(car.s, car.x, car.heading, height, vehicle, world.waterLevel?.(car.s, car.x));
@@ -158,6 +151,11 @@ export function drive(car, dt, input, automatic, world, height, vehicle) {
   car.clearance = Math.max(0, offset - travel);
   if (offset < -travel * 0.8) car.verticalSpeed = Math.max(car.verticalSpeed, supportSpeed);
   if (!automatic) {
+    if (height(car.s, car.x) < next.waterLevel - vehicle.ford && next.y + car.extension + car.clearance <= next.waterLevel) {
+      car.speed = 0;
+      joinRoad(car, world);
+      return 'deep-water';
+    }
     if (!wasAirborne && car.clearance > 0) car.speed /= Math.hypot(1, ground.grade);
     if (wasAirborne && car.clearance === 0) {
       car.speed = (car.speed + car.verticalSpeed * next.grade) / Math.hypot(1, next.grade);

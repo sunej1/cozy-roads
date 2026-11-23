@@ -98,7 +98,7 @@ export function makeWater(sunVisibility, bedrock, cozy) {
   const clock = uniform(0);
   const anchor = new THREE.Object3D();
   anchor.rotation.x = -Math.PI / 2;
-  const planar = reflector({ target: anchor, resolutionScale: 0.50, bounces: false, samples: 0 });
+  const planar = reflector({ target: anchor, resolutionScale: 0.50, generateMipmaps: true, bounces: false, samples: 0 });
   const flow = attribute('flow', 'vec2');
   const p = positionWorld.xz;
   // Crossfade two short drifts so bends never stretch the ripples over a long drive.
@@ -116,41 +116,32 @@ export function makeWater(sunVisibility, bedrock, cozy) {
   const wave4 = dot(p, vec2(4.42, 1.65)).add(clock.mul(3.1)).add(wind.mul(2.6));
   const wave5 = dot(p, vec2(-0.15, 0.48)).sub(clock.mul(0.82)).add(crosswind.mul(2.2));
   const waveFalloff = smoothstep(28, 390, distance).oneMinus();
-  const ripple = vec2(wave1.cos().mul(0.026).add(wave2.sin().mul(0.024), wave4.sin().mul(0.022), wave5.sin().mul(0.017)),
-    wave2.cos().mul(0.027).add(wave3.sin().mul(0.025), wave4.cos().mul(0.026), wave5.cos().mul(0.020)))
+  const ripple = vec2(wave1.cos().mul(0.022).add(wave2.sin().mul(0.024), wave4.sin().mul(0.012), wave5.sin().mul(0.017)),
+    wave2.cos().mul(0.027).add(wave3.sin().mul(0.025), wave4.cos().mul(0.022), wave5.cos().mul(0.020)))
     .mul(waveFalloff.mul(0.83).add(0.17)).toVar();
   const disturbance = ripple.add(eddies.sub(0.5).mul(0.33, current, waveFalloff));
   const waterNormal = vec3(disturbance.x, 1, disturbance.y).normalize();
   const fresnel = dot(waterNormal, view).clamp(0, 1).oneMinus().pow(5).mul(0.97).add(0.025);
-  const bank = attribute('shore', 'float');
-  const shallows = smoothstep(1.2, 21, bank).oneMinus().mul(smoothstep(-2, 1, bank));
-  const bankRipples = wave3.add(wave2.sin().mul(0.52)).sin().mul(0.5).add(0.5);
-  const shoal = mix(color('#506f62'), color('#96a782'), bankRipples.mul(0.37));
-  const lakeColor = mix(color('#153d49'), shoal, shallows.mul(0.90));
-  const gravel = texture(bedrock, p.mul(0.51).add(disturbance.mul(0.28))).b;
-  const riverBed = mix(color('#485749'), color('#919377'), gravel);
-  const riverColor = mix(riverBed, color('#244e51'), smoothstep(-2, 12, bank));
-  const surfaceScatter = wave1.sin().mul(0.56).add(wave2.sin().mul(0.23)).mul(waveFalloff).mul(0.025);
+  const depth = attribute('waterDepth', 'float').max(0);
+  const opticalPath = depth.div(dot(view, waterNormal).clamp(0.36, 1));
+  const transmission = opticalPath.mul(vec3(-0.54, -0.24, -0.15)).exp();
+  const gravel = texture(bedrock, p.mul(0.51).add(disturbance.mul(depth.min(3), 0.7))).b;
+  const bed = mix(color('#5d5342'), color('#ada38a'), gravel);
+  const deep = mix(color('#234d53'), color('#365a52'), current);
+  const body = mix(deep, bed, transmission).mul(sunVisibility.mul(0.26).add(0.74));
   const sunlight = vec3(SUN.x, SUN.y, SUN.z);
-  const glint = dot(waterNormal, sunlight.add(view).normalize()).max(0).pow(190).mul(1.12, sunVisibility);
+  const glint = dot(waterNormal, sunlight.add(view).normalize()).max(0).pow(155).mul(0.64, sunVisibility);
   const skyTint = mix(mix(color('#759fae'), color('#a3b4bf'), cozy), mix(color('#e5cbb0'), color('#ecc2a2'), cozy), dot(view.negate(), sunlight).max(0).pow(6));
-  const distortion = vec2(ripple.x, ripple.y).mul(0.135).mul(smoothstep(0, 6, bank));
-  const reflected = planar.sample(screenUV.flipX().add(distortion).clamp(0.004, 0.996)).rgb;
-  // At a grazing angle one reflection texel can straddle the far bank and the sky.
-  // Blend through the shallow lakebed across that footprint.
-  const shoreline = smoothstep(1, bank.fwidth().mul(2).add(10), bank);
-  const path = mix(shoal, reflected, shoreline).mul(color('#d7eeee')).add(skyTint.mul(0.075));
-  const waveFront = bank.mul(3.5).add(wave1.sin().mul(0.69)).sub(clock.mul(2.7)).cos().max(0).pow(9);
-  const foamEdge = smoothstep(1.1, 3.5, bank).oneMinus().mul(smoothstep(0, 0.5, bank)).mul(waveFront).mul(0.30);
-
-  const riffles = smoothstep(0.64, 0.82, eddies.y).mul(eddies.x, current, shallows, waveFalloff, 0.23);
+  const distortion = disturbance.mul(0.061, smoothstep(0, 2.5, depth));
+  const reflected = planar.sample(screenUV.flipX().add(distortion).clamp(0.004, 0.996))
+    .level(smoothstep(5, 190, distance).mul(1.8).add(0.6)).rgb;
+  const riffles = smoothstep(0.65, 0.83, eddies.y).mul(eddies.x, current, smoothstep(0.1, 1.8, depth).oneMinus(), waveFalloff, 0.16);
   const material = new THREE.MeshBasicNodeMaterial();
   const lowMaterial = new THREE.MeshBasicNodeMaterial();
-  for (const [surface, reflection] of [[material, path], [lowMaterial, skyTint]]) {
-    surface.userData.waterReflection = 0.72;
-    surface.colorNode = mix(mix(lakeColor, riverColor, current).mul(sunVisibility.mul(0.26).add(0.74)),
-      mix(reflection, skyTint, current), fresnel.mul(0.89))
-      .add(surfaceScatter).add(color('#ffce92').mul(glint).mul(1.28)).add(color('#b9afa0').mul(foamEdge.mul(current.oneMinus()).add(riffles)));
+  for (const [surface, reflection] of [[material, reflected], [lowMaterial, skyTint]]) {
+    surface.userData.waterReflection = 0.36;
+    surface.colorNode = mix(body, mix(reflection, skyTint, current), fresnel)
+      .add(color('#ffdfb4').mul(glint), color('#bbc4bb').mul(riffles));
   }
 
   return { anchor, clock, material, lowMaterial, reflector: planar.reflector };
@@ -293,9 +284,11 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, low 
   const stone = strata.mul(blocks.r.mul(0.86).add(ledges.r.mul(0.49), outcrop.r.mul(0.48), 0.31),
     recess.mul(0.48).add(0.63));
   const high = p.y.add(macro.r.sub(0.5).mul(110));
-  const exposed = smoothstep(0.45, 0.83, nWorld.y)
-    .oneMinus()
-    .max(smoothstep(170, 420, high));
+  // Soil gathers on benches and between ribs. Patch and grain scales break up the edges.
+  const bare = nWorld.y.oneMinus().add(smoothstep(145, 510, high).mul(0.23),
+    field.r.sub(0.5).mul(0.34), face.sub(0.5).mul(0.29), grain.g.sub(0.5).mul(0.12));
+  const exposed = smoothstep(0.19, 0.44, bare);
+  const thinSoil = smoothstep(0.09, 0.29, bare);
   const shelter = residual.z.negate().clamp(-40, 40).mul(4.8).add(aspect.mul(80), field.r.sub(0.5).mul(115));
   const snowline = smoothstep(325, 750, high.add(shelter));
   const adhesion = smoothstep(0.38, 0.84, nWorld.y.add(aspect.mul(0.12), field.g.sub(0.5).mul(0.2)));
@@ -310,7 +303,9 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, low 
   );
   const canopy = mix(color('#273e38'), color('#566449'), field.b.mul(0.6).add(grain.g.mul(0.4)));
   const drifts = mix(color('#b1c3cf'), color('#faf8ef'), field.g.mul(0.38).add(0.46));
-  const coarse = mix(mix(mix(meadow, canopy, forest), stone, exposed), drifts, snow);
+  const turfCover = mix(meadow, canopy, forest);
+  const brokenGround = mix(turfCover, stone, outcrop.b.mul(0.52).add(0.16));
+  const coarse = mix(mix(mix(turfCover, brokenGround, thinSoil), stone, exposed), drifts, snow);
   const offsets = attribute('groundOffsets', 'vec3');
   const roadside = offsets.x.abs();
   const gravel = texture(bedrock, p.xz.mul(0.64)).b;
@@ -327,7 +322,7 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, low 
 
   const near = smoothstep(60, 390, zoom).oneMinus();
   const crag = outcrop.g.mul(1.12).add(field.g.mul(0.36), grain.g.mul(near).mul(0.08));
-  const cliffRelief = blocks.g.mul(32).add(ledges.g.mul(6.5)).mul(exposed);
+  const cliffRelief = blocks.g.mul(19).add(ledges.g.mul(4.8)).mul(exposed);
   const detail = low ? float(0) : crag.mul(exposed).add(grain.b.mul(near, 0.038),
     sod.g.mul(near, exposed.oneMinus(), 0.032), gravel.mul(shoulder, 0.03));
   const relief = cliffRelief.add(detail).mul(snow.mul(-0.95).add(1), cozy.mul(-0.32).add(1)).toVar();
