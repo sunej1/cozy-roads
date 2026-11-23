@@ -1,6 +1,6 @@
 # Cozy Roads
 
-A Three.js driving game. **The Open Road** keeps generating a road through lake basins, pine forests, river valleys, and alpine mountains as you drive. [Play Cozy Roads](https://sunej1.github.io/cozy-roads/)
+A Three.js driving game. **The Open Road** keeps generating a road through lake basins, pine forests, river valleys, alpine mountains, and coastal fjords as you drive. [Play Cozy Roads](https://sunej1.github.io/cozy-roads/)
 
 ## Run locally
 
@@ -15,9 +15,9 @@ Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, a
 
 ## Explore a world
 
-The default seed is `83472`. Choose **New world** from the start or pause screen to generate another seed. Share or reload the resulting URL to reproduce its road and scenery. You can also enter a seed directly, for example `?seed=275`. **Restart** returns to the beginning of the current seed.
+The default seed is `83472`. Choose **New world** from the start or pause screen to generate another seed. Share or reload the resulting URL to reproduce its road and scenery. You can also enter a seed directly, for example `?seed=275`. Ordinary visits and **Restart** pick a random road position. Resume keeps your position, and the trip meter starts at zero for each new drive. Add `start` in metres to replay a particular departure, such as `?seed=83472&start=2800` for a fjord.
 
-Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. On the default seed, a broad river valley opens around 1.7 km, with the water on the left as you drive forward. The road follows the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
+Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. Alternating groups of landscapes include inland lakes and steep-sided coastal inlets with an open passage to the sea. The road follows the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
 
 ## Vehicles
 
@@ -34,10 +34,10 @@ The measurements are elapsed time between browser animation callbacks. They incl
 | Preset | Rendering |
 | --- | --- |
 | Standard | Surveyed mountain relief, slope-dependent snow, distant forest stands, volumetric clouds, terrain and cloud shadows, layered meadow grass that bends under the tires, wind-animated trees, and planar lake reflections. |
-| Cinematic | Screen-space diffuse bounce and ambient occlusion, ray-marched sunbeams, and HDR bloom in addition to Standard. Begins rendering at full resolution, can reduce each internal dimension to 90% under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
+| Cinematic | Traces short sun-contact rays and reflection rays against the visible depth buffer. Water and polished materials receive screen-space reflections. Planar water and environment reflections supply off-screen scenery. Also includes diffuse bounce, ambient occlusion, sunbeams and HDR bloom. Begins rendering at full resolution, can reduce each internal dimension to 90% under sustained load, and temporally reconstructs to the fixed output size. Requires WebGPU. |
 | Low | Shorter draw distance, fewer trees, lower internal resolution, and simpler terrain, water, and lighting. |
 
-The drive, speed, and starting point are shared across presets.
+The benchmark always begins at station zero on the selected seed and restores your drive afterward.
 
 ## Art credits
 

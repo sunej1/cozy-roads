@@ -35,7 +35,8 @@ export function bandColumns(band) {
 }
 const rows = CHUNK_LENGTH / TERRAIN_STEP + 1;
 
-function waterMesh(world, scanlines) {
+export function buildWater(world, id, seaReach = 14000) {
+  const scanlines = Array.from({length: rows + 2}, (_, i) => world.section(id * CHUNK_LENGTH + (i - 1) * TERRAIN_STEP));
   const positions = [];
   const shore = [];
   const indices = [];
@@ -50,14 +51,18 @@ function waterMesh(world, scanlines) {
     const across = (after.x + (after.water?.center ?? water.center)
       - before.x - (before.water?.center ?? water.center)) / (2 * TERRAIN_STEP);
     const current = water.flow / Math.hypot(1, across);
-    for (let j = 0; j <= segments; j++) {
-      const lateral = mix(water.left - 10, water.right + 10, j / segments);
+    const f = sample.fjord;
+    const outlet = f && Math.abs(f.t - 0.43) < 0.42 ? f.side : 0;
+    for (let j = -1; j <= segments + 1; j++) {
+      let lateral = mix(water.left - 10, water.right + 10, Math.min(1, Math.max(0, j / segments)));
+      if (j === -1 && outlet < 0) lateral = -seaReach;
+      if (j === segments + 1 && outlet > 0) lateral = seaReach;
       positions.push(sample.x + lateral, water.level, -sample.s);
       shore.push(world.shoreDistance(sample, lateral));
       flow.push(-across * current, current);
     }
     if (previous?.basin === water.basin) {
-      for (let j = 0; j < segments; j++) {
+      for (let j = 0; j < segments + 2; j++) {
         const a = previous.start + j, b = start + j;
         indices.push(a, a + 1, b, a + 1, b + 1, b);
       }
@@ -128,7 +133,7 @@ export function buildTerrain(world, id, band = 0) {
       }
     }
   }
-  return { position, normal, relief, groundOffsets, index, water: band === 0 ? waterMesh(world, scanlines) : null };
+  return { position, normal, relief, groundOffsets, index };
 }
 
 export function tileSurface(data, id, s, x, band = 0) {

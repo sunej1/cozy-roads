@@ -6,7 +6,7 @@ import { driverEye } from './forest.js';
 import { WorldView } from './world-view.js';
 import { createWorld, parseSeed } from './world.js';
 import { makeCinematic } from './cinematic.js';
-import { ROAD_EDGE, BENCHMARK_SECONDS, clamp, drive, groundPose, joinRoad, mix, newCarState, surfaceAt, TOUR_SPEED } from './route.js';
+import { ROAD_EDGE, BENCHMARK_SECONDS, clamp, drive, groundPose, joinRoad, mix, newCarState, spawnStation, surfaceAt, TOUR_SPEED } from './route.js';
 import { VEHICLES, vehicleId } from './vehicles.js';
 import { RecentFrames, ResolutionBudget, summarize } from './timing.js';
 
@@ -92,7 +92,7 @@ function setMode(next) {
 
   if (mode === 'ready') {
     ui['intro-title'].textContent = 'The Open Road';
-    ui['intro-description'].textContent = 'An endless drive through forests, lakes, river valleys, and mountains.';
+    ui['intro-description'].textContent = 'An endless drive through forests, river valleys, alpine lakes, and fjords.';
     ui.start.textContent = 'Start drive';
     ui.auto.textContent = 'Auto-drive';
   } else if (mode === 'paused') {
@@ -105,8 +105,8 @@ function setMode(next) {
 }
 
 function startDrive(useAuto, restart = false) {
-  if (restart || mode !== 'paused') {
-    car = newCarState(world);
+  if (restart) {
+    car = newCarState(world, spawnStation(location.search));
     landscape.tracks.clear();
     wheelTurn = 0;
   }
@@ -465,6 +465,7 @@ function bindControls() {
     const next = new URL(location.href);
     const [seed] = crypto.getRandomValues(new Uint32Array(1));
     next.searchParams.set('seed', String(seed));
+    next.searchParams.delete('start');
     location.assign(next);
   });
   ui.pause.addEventListener('click', pauseDrive);
@@ -521,7 +522,7 @@ async function initialize() {
   const [, assets, vehicles] = await Promise.all([renderer.init(), loadLandscapeAssets(), loadVehicles()]);
   models = vehicles;
   world = createWorld(parseSeed(location.search), assets.elevations);
-  car = newCarState(world);
+  car = newCarState(world, spawnStation(location.search));
   rendererName = renderer.backend.isWebGPUBackend ? 'WebGPU' : 'WebGL 2';
   const cinematicOption = ui.quality.querySelector('[value=cinematic]');
   cinematicOption.hidden = cinematicOption.disabled = rendererName !== 'WebGPU';

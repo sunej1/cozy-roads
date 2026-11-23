@@ -11,7 +11,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CHUNK_LENGTH, mix, noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 import { atmosphere, makeSky, makeReliefTexture, makeTerrainMaterial, makeBoulderMaterial, makeWater, skyEnvironment, SUN } from './landscape.js';
 import { applyMeadowWind, aspen, aspenMaterial, coniferMaterial, grassMaterial, bladeMaterial, flowerMaterial, understory, understoryMaterial } from './forest.js';
-import { bandBounds, buildTerrain, terrainBand, TERRAIN_STEP as STEP, tileSurface } from './terrain.js';
+import { bandBounds, buildTerrain, buildWater, terrainBand, TERRAIN_STEP as STEP, tileSurface } from './terrain.js';
 
 const paintMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.91 });
 const railMaterial = new THREE.MeshStandardMaterial({ color: 0x939e9c, metalness: 0.67, roughness: 0.58 });
@@ -331,6 +331,7 @@ export class WorldView {
     } catch {
       this.worker = null;
     }
+    this.waterStrips = new Map();
     this.chunks = new Map();
     this.terrainRevision = 0;
     coniferMaterial.map = assets.canopy;
@@ -413,18 +414,6 @@ export class WorldView {
     groundMesh.receiveShadow = true;
     chunk.add(groundMesh);
 
-    let water = null;
-    if (tile.water) {
-      const surface = new THREE.BufferGeometry();
-      surface.setAttribute('position', new THREE.BufferAttribute(tile.water.position, 3));
-      surface.setAttribute('flow', new THREE.BufferAttribute(tile.water.flow, 2));
-      surface.setAttribute('shore', new THREE.BufferAttribute(tile.water.shore, 1));
-      surface.setIndex(new THREE.BufferAttribute(tile.water.index, 1));
-      surface.computeVertexNormals();
-      water = new THREE.Mesh(surface, this.low || !tile.water.hasLake ? this.water.lowMaterial : this.water.material);
-      chunk.add(water);
-    }
-
     if (band === 0) {
       const cols = [-ROAD_EDGE, -3.5, -2.15, 0, 2.15, 3.5, ROAD_EDGE];
       const road = new THREE.Mesh(strip(world, cols, start, end, STEP, (s, lateral) => {
@@ -445,7 +434,7 @@ export class WorldView {
     trees.castShadow = aspens.castShadow = rocks.castShadow = true;
     trees.receiveShadow = aspens.receiveShadow = rocks.receiveShadow = shrubs.receiveShadow = true;
     chunk.add(trees, aspens, rocks, nearStones, ...scanned, shrubs);
-    this.chunks.set(id + ':' + band, { id, band, tile, chunk, groundMesh, water, trees, aspens, rocks, nearStones, scanned, shrubs, treeCount: trees.count });
+    this.chunks.set(id + ':' + band, { id, band, tile, chunk, groundMesh, trees, aspens, rocks, nearStones, scanned, shrubs, treeCount: trees.count });
     this.scene.add(chunk);
     this.terrainRevision++;
   }
@@ -458,6 +447,36 @@ export class WorldView {
     return chunk ? tileSurface(chunk.tile, id, s, x, band) : this.world.terrainHeight(s, lateral);
   }
 
+  updateWater(first, last, x) {
+    const reach = (Math.floor(Math.abs(x) / 4096) + 4) * 4096;
+    if (first === this.waterFirst && last === this.waterLast && reach === this.seaReach) return;
+    for (const [id, mesh] of this.waterStrips) {
+      if (id >= first && id <= last && reach === this.seaReach) continue;
+      if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); }
+      this.waterStrips.delete(id);
+    }
+    this.waterFirst = first;
+    this.waterLast = last;
+    this.seaReach = reach;
+    for (let id = first; id <= last; id++) {
+      if (this.waterStrips.has(id)) continue;
+      const data = buildWater(this.world, id, reach);
+      let mesh = null;
+      if (data) {
+        const surface = new THREE.BufferGeometry();
+        surface.setAttribute('position', new THREE.BufferAttribute(data.position, 3));
+        surface.setAttribute('flow', new THREE.BufferAttribute(data.flow, 2));
+        surface.setAttribute('shore', new THREE.BufferAttribute(data.shore, 1));
+        surface.setIndex(new THREE.BufferAttribute(data.index, 1));
+        surface.computeVertexNormals();
+        mesh = new THREE.Mesh(surface, this.low || !data.hasLake ? this.water.lowMaterial : this.water.material);
+        mesh.userData.hasLake = data.hasLake;
+        this.scene.add(mesh);
+      }
+      this.waterStrips.set(id, mesh);
+    }
+  }
+
   update(car, low, eager = false) {
     const current = Math.floor(car.s / CHUNK_LENGTH);
     const lateral = car.x - this.world.centerX(car.s);
@@ -466,6 +485,7 @@ export class WorldView {
     const reach = low ? 9 : 12;
     const backwards = Math.ceil(mix(3, reach, smooth(-0.55, 0.36, -along)));
     const forwards = Math.ceil(mix(3, reach, smooth(-0.55, 0.36, along)));
+    this.updateWater(current - backwards, current + forwards, car.x);
     const sideRange = low ? 740 : 910;
     const left = terrainBand(lateral - sideRange - Math.max(0, -across) * 410);
     const right = terrainBand(lateral + sideRange + Math.max(0, across) * 410);
@@ -540,9 +560,11 @@ export class WorldView {
     this.lowSun.visible = low;
     this.horizon.material = low ? this.lowTerrainMaterial : this.terrainMaterial;
     for (const { mesh } of this.horizon.pages.values()) mesh.material = this.horizon.material;
-    for (const { groundMesh, water, tile } of this.chunks.values()) {
+    for (const { groundMesh } of this.chunks.values()) {
       groundMesh.material = low ? this.lowTerrainMaterial : this.terrainMaterial;
-      if (water) water.material = low || !tile.water.hasLake ? this.water.lowMaterial : this.water.material;
+    }
+    for (const water of this.waterStrips.values()) {
+      if (water) water.material = low || !water.userData.hasLake ? this.water.lowMaterial : this.water.material;
     }
   }
 

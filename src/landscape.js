@@ -146,6 +146,7 @@ export function makeWater(sunVisibility, bedrock) {
   const material = new THREE.MeshBasicNodeMaterial();
   const lowMaterial = new THREE.MeshBasicNodeMaterial();
   for (const [surface, reflection] of [[material, path], [lowMaterial, skyTint]]) {
+    surface.userData.waterReflection = 0.72;
     surface.colorNode = mix(mix(lakeColor, riverColor, current).mul(sunVisibility.mul(0.26).add(0.74)),
       mix(reflection, skyTint, current), fresnel.mul(0.89))
       .add(surfaceScatter).add(color('#ffce92').mul(glint).mul(1.28)).add(color('#b9afa0').mul(foamEdge.mul(current.oneMinus()).add(riffles)));

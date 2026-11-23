@@ -36,18 +36,28 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
       [slots[i], slots[j]] = [slots[j], slots[i]];
     }
 
+    // Keep one inland lake and one tidal inlet in each pair of landscape groups.
+    const coastal = Math.abs(group % 2) === 1;
+    if (coastal) {
+      const lakeSlot = slots.indexOf(0);
+      const interior = 1 + (order() < 0.5 ? 0 : 1);
+      [slots[lakeSlot], slots[interior]] = [slots[interior], slots[lakeSlot]];
+    }
     const biome = slots[index - group * 4];
+    const fjord = coastal && biome === 0;
     const random = randomFor(seed ^ Math.imul(index + 479, 0x18a4f29));
     const side = index === 0 || random() < 0.53 ? -1 : 1;
     const length = 212 + random() * 44;
     const width = 100 + random() * 49;
     feature = {
       ...BIOMES[biome],
+      ...(fjord && { name: 'Fjords', grade: 27, ridge: 165, trees: 0.48 }),
       index,
       lake: biome === 0 ? {
         side,
         s: index * REGION_LENGTH + (index === 0 ? 38 : (random() - 0.5) * 22),
-        length,
+        fjord,
+        length: fjord ? length * 2.15 : length,
         width,
         lateral: side * (width + 26 + random() * 22),
         phase: random() * Math.PI * 2,
@@ -103,12 +113,22 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     const lake = Math.abs(s - home.s) - home.length < Math.abs(s - neighbor.s) - neighbor.length ? home : neighbor;
     const t = (s - lake.s) / lake.length;
     const fromShore = Math.abs(s - lake.s) - lake.length;
-    const lakeX = lake.lateral + Math.sin(t * 4.2 + lake.phase) * 9;
-    const lakeWidth = lake.width * (1 + 0.12 * Math.sin(t * 5.8 + lake.phase));
+    // The glacial trough bends past a narrow headland before opening into a deep outer sound.
+    const mouth = smooth(-0.24, 0.56, t);
+    const lakeWidth = lake.fjord
+      ? 102 + 228 * mouth + Math.sin(6 * t + lake.phase) * 17
+      : lake.width * (1 + 0.12 * Math.sin(t * 5.8 + lake.phase));
+    const lakeX = lake.fjord
+      ? lake.side * (lakeWidth + 32 + 18 * Math.sin(t * 4 + lake.phase))
+      : lake.lateral + Math.sin(t * 4.2 + lake.phase) * 9;
     const lakes = fromShore < 80 ? [{ s: lake.s, lateral: lakeX, width: lakeWidth, t, edgeScale: lakeWidth }] : [];
+    const fjord = lake.fjord && fromShore < 200 ? {
+      side: lake.side, t, center: lakeX, width: lakeWidth, length: lake.length,
+      weight: 1 - smooth(0, 200, fromShore),
+    } : null;
     const openWidth = lakeWidth * Math.sqrt(Math.max(0, 1 - t * t));
     const toDivide = shoreGap * 0.5 - fromShore;
-    if (toDivide <= 8) return { lakes, water: null };
+    if (toDivide <= 8) return { lakes, fjord, water: null };
 
     const source = smooth(8, Math.min(90, shoreGap * 0.4), toDivide);
     const current = smooth(-36, 24, fromShore);
@@ -117,7 +137,7 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     const width = (17 + 4 * Math.sin(s / 94 + lake.phase)) * source;
     const left = Math.min(openWidth > 0 ? lakeX - openWidth : Infinity, center - width);
     const right = Math.max(openWidth > 0 ? lakeX + openWidth : -Infinity, center + width);
-    return { lakes, water: {
+    return { lakes, fjord, water: {
       basin: lake.s, center, width, left, right, source,
       level: 7 * (1 - Math.exp(-Math.max(0, fromShore) / 510)),
       flow: Math.sign(t) * current, lake: openWidth > 0,
@@ -126,7 +146,7 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
 
   function waterLevel(s, x) {
     const lateral = x - centerX(s);
-    if (Math.abs(lateral) < 12 || Math.abs(lateral) > 350) return 0;
+    if (Math.abs(lateral) < 12 || Math.abs(lateral) > 900) return 0;
     const { water } = drainage(s);
     return water && lateral >= water.left - 10 && lateral <= water.right + 10 ? water.level : 0;
   }
@@ -145,13 +165,20 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     };
   }
 
+  function outletShore(fjord, lateral) {
+    if (!fjord || Math.abs(fjord.t - 0.43) >= 0.42) return -Infinity;
+    const across = fjord.side * (lateral - fjord.center);
+    const halfWidth = fjord.length * (0.082 + 0.22 * smooth(fjord.width, 1900, across));
+    return Math.min(across, halfWidth - Math.abs(fjord.t - 0.43) * fjord.length);
+  }
+
   function shoreDistance(row, lateral) {
     let closest = row.water && row.water.flow !== 0 ? row.water.width - Math.abs(lateral - row.water.center) : -Infinity;
     for (const lake of row.lakes) {
       const shore = (1 - Math.hypot((lateral - lake.lateral) / lake.width, lake.t)) * lake.edgeScale;
       closest = Math.max(closest, shore);
     }
-    return closest;
+    return Math.max(closest, outletShore(row.fjord, lateral));
   }
 
   function mountainWeight(distance) {
@@ -163,6 +190,18 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     target[index + 3] = mountainWeight(Math.abs(lateral));
   }
 
+  function bankHeight(row, lateral, base, gravel) {
+    const shore = shoreDistance(row, lateral);
+    const bankRun = 42 + Math.abs(row.water?.flow ?? 0) * row.grade;
+    if (shore < -bankRun) return base;
+    const level = row.water?.level ?? 0;
+    const depth = (25 + 64 * (row.fjord?.weight ?? 0)) * smooth(0, 92, shore) + 1.05 * smooth(0, 7, shore);
+    // The shoulder stays attached to the road even when an irregular bank approaches it.
+    const beach = smooth(0, bankRun, -shore);
+    const bank = level + Math.max(1.5, base - level) * beach - depth;
+    return mix(base, bank, gravel * (row.water?.source ?? 1));
+  }
+
   function sampleTerrain(row, lateral) {
     const distance = Math.abs(lateral);
     if (distance <= ROAD_EDGE) return row.grade + 0.12 * (1 - (lateral / ROAD_EDGE) ** 2);
@@ -170,7 +209,10 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     const s = row.s;
     const x = row.x + lateral;
     const outer = mountainWeight(distance);
-    if (outer === 1) return mountains.height(x, s);
+    if (outer === 1) {
+      const altitude = mountains.height(x, s);
+      return row.fjord ? bankHeight(row, lateral, altitude, 1) : altitude;
+    }
     const rolling = noise(x / 112 + key, s / 168);
     const hummock = noise(x / 37 + key + 25, s / 51) - 0.5;
     const surface = noise(x / 8.5 + key + 4, s / 13) - 0.5;
@@ -193,16 +235,17 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
       + range * cracks * mix(9, 32, rugged);
     const floodplain = row.grade + gravel * (hummock * 2 + surface * 0.35);
     const foothills = mix(inner, floodplain, row.valley * (1 - smooth(118, 410, distance)));
-    const base = outer > 0 ? mix(foothills, mountains.height(x, s), outer) : foothills;
-    const shore = shoreDistance(row, lateral);
-    const bankRun = 42 + Math.abs(row.water?.flow ?? 0) * row.grade;
-    if (shore < -bankRun) return base;
-    const level = row.water?.level ?? 0;
-    const depth = 25 * smooth(0, 92, shore) + 1.05 * smooth(0, 7, shore);
-    // The shoulder stays attached to the road even when an irregular bank approaches it.
-    const beach = smooth(0, bankRun, -shore);
-    const bank = level + Math.max(1.5, base - level) * beach - depth;
-    return mix(base, bank, gravel * (row.water?.source ?? 1));
+    let base = outer > 0 ? mix(foothills, mountains.height(x, s), outer) : foothills;
+    if (row.fjord) {
+      const f = row.fjord;
+      const halfWidth = f.width * Math.sqrt(Math.max(0, 1 - f.t * f.t));
+      const seaward = f.side * (lateral - f.center);
+      const wall = Math.abs(seaward) - halfWidth;
+      const cliff = smooth(5, 122, wall) * (1 - smooth(280, 825, wall));
+      const face = 143 + 85 * fold + 52 * cracks + 45 * valley;
+      base += f.weight * cliff * face * smooth(8, 104, distance) * (1 - outer);
+    }
+    return bankHeight(row, lateral, base, gravel);
   }
 
   function terrainHeight(s, lateral) {

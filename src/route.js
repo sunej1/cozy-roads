@@ -38,8 +38,14 @@ export function noise(x, z) {
   );
 }
 
-export function newCarState(world) {
-  const car = { x: 0, s: 0, distance: 0, heading: 0, speed: 0, steering: 0 };
+export function spawnStation(query, random = Math.random) {
+  const start = new URLSearchParams(query).get('start');
+  if (start !== null && /^-?\d{1,5}$/.test(start)) return Number(start);
+  return Math.floor(random() * 24001) - 12000;
+}
+
+export function newCarState(world, station = 0) {
+  const car = { x: 0, s: station, distance: 0, heading: 0, speed: 0, steering: 0 };
   joinRoad(car, world);
   return car;
 }

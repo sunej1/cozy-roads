@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { CHUNK_LENGTH, drive, newCarState, ROAD_EDGE, surfaceAt, TOUR_SPEED } from '../src/route.js';
-import { bandBounds, buildTerrain, terrainBand, tileSurface, TERRAIN_COLUMNS } from '../src/terrain.js';
+import { CHUNK_LENGTH, drive, newCarState, spawnStation, ROAD_EDGE, surfaceAt, TOUR_SPEED } from '../src/route.js';
+import { bandBounds, buildTerrain, buildWater, terrainBand, tileSurface, TERRAIN_COLUMNS } from '../src/terrain.js';
 import { createWorld as seededWorld, DEFAULT_SEED, parseSeed, REGION_LENGTH } from '../src/world.js';
 import { carveBedrock } from '../src/highlands.js';
 import { mountainPage } from '../src/horizon.js';
@@ -53,7 +53,7 @@ test('the seed fixes the road, all terrain types recur, and lakes close off the 
 
   for (const start of [0, 4, 40]) {
     const names = Array.from({ length: 4 }, (_, i) => world.biomeAt((start + i) * REGION_LENGTH).name);
-    assert.deepEqual(names.sort(), ['Alpine mountains', 'Lakeshore', 'Pine forest', 'River valley']);
+    assert.deepEqual(names.sort(), ['Alpine mountains', start % 8 === 0 ? 'Lakeshore' : 'Fjords', 'Pine forest', 'River valley']);
   }
 
   const start = world.section(0);
@@ -75,15 +75,15 @@ test('terrain tiles match across boundaries regardless of build order', () => {
     assert.deepEqual(tile.relief.slice(-uvStride), next.relief.slice(0, uvStride));
     assert.deepEqual(tile, buildTerrain(createWorld(), index));
   }
-  const lake = buildTerrain(world, 0).water;
+  const lake = buildWater(world, 0);
   assert.ok(lake?.index.length > 0);
   assert.ok(lake.shore.some(value => value > 0));
-  const river = buildTerrain(world, 6).water;
+  const river = buildWater(world, 6);
   assert.equal(river.hasLake, false);
   assert.equal(lake.hasLake, true);
   assert.ok(river.flow.some(value => value > 0.5));
-  const next = buildTerrain(world, 7).water;
-  for (const [field, stride] of [['position', 39], ['flow', 26], ['shore', 13]]) {
+  const next = buildWater(world, 7);
+  for (const [field, stride] of [['position', 45], ['flow', 30], ['shore', 15]]) {
     assert.deepEqual(river[field].slice(-stride), next[field].slice(0, stride));
   }
 });
@@ -506,4 +506,46 @@ test('river valleys have a broad floor and vehicles stop at their ford depth abo
   const depth = world.waterLevel(car.s, car.x) - height(car.s, car.x);
   assert.ok(height(car.s, car.x) > 0 && depth > VEHICLES.trail.ford - 0.05 && depth <= VEHICLES.trail.ford);
   assert.equal(car.speed, 0);
+});
+
+test('random departures start on pavement with a fresh trip meter and pinned starts replay', () => {
+  const world = createWorld();
+  const sample = [0, 0.33, 0.7, 0.999999].map(r => spawnStation('', () => r));
+  assert.equal(new Set(sample).size, 4);
+  for (const s of sample) {
+    const car = newCarState(world, s);
+    assert.equal(car.s, s);
+    assert.equal(car.x, world.centerX(s));
+    assert.equal(car.heading, -world.routePose(s).yaw);
+    assert.equal(car.distance, 0);
+    assert.equal(car.speed, 0);
+  }
+  assert.equal(spawnStation('?start=-2800'), -2800);
+  assert.equal(spawnStation('?start=NaN', () => 0), sample[0]);
+});
+
+test('fjords have a deep tidal trough, a widening outer sound and steep walls', () => {
+  for (const seed of [0, DEFAULT_SEED, 4294967295]) {
+    const world = createWorld(seed);
+    for (const group of [-3, -1, 1, 3]) {
+      const regions = Array.from({length: 4}, (_, i) => world.biomeAt((4 * group + i) * REGION_LENGTH));
+      const inlet = regions.find(region => region.name === 'Fjords').lake;
+      const inner = world.section(inlet.s - 0.37 * inlet.length);
+      const outer = world.section(inlet.s + 0.66 * inlet.length);
+      assert.ok(outer.water.right - outer.water.left > 1.8 * (inner.water.right - inner.water.left));
+      const mouth = world.section(inlet.s + 0.43 * inlet.length);
+      for (const lateral of [450, 950, 1710, 4000, 8000]) {
+        assert.ok(world.sampleTerrain(mouth, inlet.side * lateral) < -1, 'navigable connection to the sea');
+      }
+      const sea = buildWater(world, Math.floor(mouth.s / CHUNK_LENGTH));
+      assert.ok(sea.position.some((v, i) => i % 3 === 0 && v * inlet.side > 9000));
+      for (const row of [inner, outer]) {
+        assert.equal(row.water.level, 0);
+        assert.ok(world.sampleTerrain(row, row.fjord.center) < -55);
+        const bank = inlet.side > 0 ? row.water.right : row.water.left;
+        assert.ok(world.sampleTerrain(row, bank + inlet.side * 145) > 100);
+        assert.ok(world.shoreDistance(row, 0) < -ROAD_EDGE);
+      }
+    }
+  }
 });
