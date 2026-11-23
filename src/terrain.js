@@ -2,9 +2,11 @@ import { CHUNK_LENGTH, mix, ROAD_EDGE } from './route.js';
 
 export const TERRAIN_STEP = 4;
 
-const verge = [-47, -40, -33, -27, -22, -17, -13, -10, -8, -6.4, -ROAD_EDGE];
+const verge = [ROAD_EDGE, 6.4, 8, 10, 13, 17, 22, 27, 33, 40, 47];
 const ridgeColumns = Array.from({ length: 193 }, (_, i) => (i - 96) * 10);
-export const TERRAIN_COLUMNS = [...new Set([...ridgeColumns, ...verge, ...verge.map(x => -x)])].sort((a, b) => a - b);
+const bankColumns = Array.from({ length: 24 }, (_, i) => 5 + i * 10);
+const shoulderColumns = [...verge, ...bankColumns];
+export const TERRAIN_COLUMNS = [...new Set([...ridgeColumns, ...shoulderColumns, ...shoulderColumns.map(x => -x)])].sort((a, b) => a - b);
 const BAND_WIDTH = 768;
 const MAIN_EDGE = TERRAIN_COLUMNS.at(-1);
 
@@ -37,35 +39,38 @@ function waterMesh(world, scanlines) {
   const positions = [];
   const shore = [];
   const indices = [];
-  const lastRow = new Map();
+  const flow = [];
   const segments = 12;
-
+  let previous = null, hasLake = false;
   for (let row = 0; row < rows; row++) {
-    const sample = scanlines[row + 1];
-    for (const lake of sample.lakes) {
-      if (Math.abs(lake.t) > 1.10) continue;
-      const halfWidth = lake.width * Math.sqrt(Math.max(0, 1 - lake.t ** 2)) + 14;
-      const start = positions.length / 3;
-      for (let j = 0; j <= segments; j++) {
-        const lateral = lake.lateral + halfWidth * (2 * j / segments - 1);
-        positions.push(sample.x + lateral, 0, -sample.s);
-        shore.push(world.shoreDistance(sample, lateral));
-      }
-      const previous = lastRow.get(lake.s);
-      if (previous?.row === row - 1) {
-        for (let j = 0; j < segments; j++) {
-          const a = previous.start + j;
-          const b = start + j;
-          indices.push(a, a + 1, b, a + 1, b + 1, b);
-        }
-      }
-      lastRow.set(lake.s, { row, start });
+    const sample = scanlines[row + 1], water = sample.water;
+    if (!water) { previous = null; continue; }
+    const start = positions.length / 3;
+    const before = scanlines[row], after = scanlines[row + 2];
+    const across = (after.x + (after.water?.center ?? water.center)
+      - before.x - (before.water?.center ?? water.center)) / (2 * TERRAIN_STEP);
+    const current = water.flow / Math.hypot(1, across);
+    for (let j = 0; j <= segments; j++) {
+      const lateral = mix(water.left - 10, water.right + 10, j / segments);
+      positions.push(sample.x + lateral, water.level, -sample.s);
+      shore.push(world.shoreDistance(sample, lateral));
+      flow.push(-across * current, current);
     }
+    if (previous?.basin === water.basin) {
+      for (let j = 0; j < segments; j++) {
+        const a = previous.start + j, b = start + j;
+        indices.push(a, a + 1, b, a + 1, b + 1, b);
+      }
+    }
+    previous = { start, basin: water.basin };
+    hasLake ||= water.lake;
   }
 
   return indices.length ? {
     position: new Float32Array(positions),
     shore: new Float32Array(shore),
+    flow: new Float32Array(flow),
+    hasLake,
     index: new Uint16Array(indices),
   } : null;
 }
@@ -81,7 +86,7 @@ export function buildTerrain(world, id, band = 0) {
   const normal = new Float32Array(position.length);
   const relief = new Float32Array(rows * columns * 4);
   const index = new Uint16Array((rows - 1) * (columns - 1) * 6);
-  const groundOffsets = new Float32Array(rows * columns * 2);
+  const groundOffsets = new Float32Array(position.length);
   let face = 0;
 
   for (let i = 0; i < rows; i++) {
@@ -92,8 +97,9 @@ export function buildTerrain(world, id, band = 0) {
       const vertex = i * columns + j;
       const k = vertex * 3;
       const lateral = offsets[j];
-      groundOffsets[vertex * 2] = lateral;
-      groundOffsets[vertex * 2 + 1] = Math.max(-128, world.shoreDistance(row, lateral));
+      groundOffsets[k] = lateral;
+      groundOffsets[k + 1] = Math.max(-128, world.shoreDistance(row, lateral));
+      groundOffsets[k + 2] = row.water?.level ?? 0;
       const y = yValues[j];
       world.reliefCoordinates(row, lateral, relief, vertex * 4);
       position[k] = row.x + lateral;

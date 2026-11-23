@@ -37,7 +37,7 @@ export class Meadow {
       if (verge < 0.48) continue;
       const y = this.height(s, x);
       if (y < 0.2 || y > 220) continue;
-      if (y < 5) {
+      if (y < 12) {
         const row = this.world.section(s);
         if (this.world.shoreDistance(row, x - row.x) > -3 - 2 * noise(x / 8, s / 8)) continue;
       }

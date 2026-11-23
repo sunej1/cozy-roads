@@ -29,7 +29,7 @@ function makeVehicle(root, environment) {
     wheel.position.set(0, 0, 0);
     pivot.add(wheel);
     root.add(pivot);
-    tires.push({ pivot, wheel, front: wheel.name.startsWith('wheel_f') });
+    tires.push({ pivot, wheel, restY: pivot.position.y, front: wheel.name.startsWith('wheel_f') });
   }
   root.traverse((object) => {
     if (!object.isMesh) return;

@@ -167,7 +167,7 @@ function scatter(world, tile, chunkId, band, start, scans, conifer, rockMaterial
     const y = tileSurface(tile, chunkId, s, row.x + lateral, band);
     const clearing = noise(lateral / 38 + world.seed % 83, s / 57);
     const lookOut = s > -22 && s < 52 && lateral < 0;
-    if (lookOut || y < 3 || y > 205 || random() > (0.15 + row.trees * .87) * (0.35 + clearing * 1.10)) continue;
+    if (lookOut || y < 3 || world.shoreDistance(row, lateral) > -2 || y > 205 || random() > (0.15 + row.trees * .87) * (0.35 + clearing * 1.10)) continue;
     const scale = (0.65 + random() ** 1.5 * 1.27) * (1 - 0.36 * smooth(63, 151, y)) * (1 + woodland * 0.24);
     dummy.position.set(row.x + lateral, y - 0.26, -s);
     dummy.rotation.set((random() - 0.5) * 0.17, random() * Math.PI * 2, (random() - 0.5) * 0.11);
@@ -243,7 +243,7 @@ function scatter(world, tile, chunkId, band, start, scans, conifer, rockMaterial
     const x = world.centerX(s) + offset;
     const y = tileSurface(tile, chunkId, s, x, band);
     const cover = noise(offset * 0.16 + 38, s * 0.12);
-    if (y < -0.03 || y > 124 || cover < 0.44) continue;
+    if (y < -0.03 || y > 124 || cover < 0.44 || (y < 8 && world.shoreDistance(world.section(s), offset) > -1)) continue;
     dummy.position.set(x, y - 0.018, -s);
     dummy.rotation.set(0, random() * Math.PI * 2, 0);
     const size = 0.39 + random() ** 1.4 * 1.13;
@@ -379,7 +379,7 @@ export class WorldView {
     for (const material of [grassMaterial, bladeMaterial, flowerMaterial, aspenMaterial]) {
       material.emissiveNode = diffuseColor.rgb.mul(backlight.mul(sunlight, 0.53).add(0.19));
     }
-    this.water = makeWater(sunlight);
+    this.water = makeWater(sunlight, assets.bedrock);
     // The half-resolution lake keeps the meadow clumps. Individual blades only resolve in the main view.
     camera.layers.enable(MEADOW_DETAIL_LAYER);
     this.water.reflector.getVirtualCamera(camera).layers.disable(MEADOW_DETAIL_LAYER);
@@ -407,7 +407,7 @@ export class WorldView {
     ground.setAttribute('position', new THREE.BufferAttribute(tile.position, 3));
     ground.setAttribute('normal', new THREE.BufferAttribute(tile.normal, 3));
     ground.setAttribute('reliefField', new THREE.BufferAttribute(tile.relief, 4));
-    ground.setAttribute('groundOffsets', new THREE.BufferAttribute(tile.groundOffsets, 2));
+    ground.setAttribute('groundOffsets', new THREE.BufferAttribute(tile.groundOffsets, 3));
     ground.setIndex(new THREE.BufferAttribute(tile.index, 1));
     const groundMesh = new THREE.Mesh(ground, this.low ? this.lowTerrainMaterial : this.terrainMaterial);
     groundMesh.receiveShadow = true;
@@ -417,10 +417,11 @@ export class WorldView {
     if (tile.water) {
       const surface = new THREE.BufferGeometry();
       surface.setAttribute('position', new THREE.BufferAttribute(tile.water.position, 3));
+      surface.setAttribute('flow', new THREE.BufferAttribute(tile.water.flow, 2));
       surface.setAttribute('shore', new THREE.BufferAttribute(tile.water.shore, 1));
       surface.setIndex(new THREE.BufferAttribute(tile.water.index, 1));
       surface.computeVertexNormals();
-      water = new THREE.Mesh(surface, this.low ? this.water.lowMaterial : this.water.material);
+      water = new THREE.Mesh(surface, this.low || !tile.water.hasLake ? this.water.lowMaterial : this.water.material);
       chunk.add(water);
     }
 
@@ -539,9 +540,9 @@ export class WorldView {
     this.lowSun.visible = low;
     this.horizon.material = low ? this.lowTerrainMaterial : this.terrainMaterial;
     for (const { mesh } of this.horizon.pages.values()) mesh.material = this.horizon.material;
-    for (const { groundMesh, water } of this.chunks.values()) {
+    for (const { groundMesh, water, tile } of this.chunks.values()) {
       groundMesh.material = low ? this.lowTerrainMaterial : this.terrainMaterial;
-      if (water) water.material = low ? this.water.lowMaterial : this.water.material;
+      if (water) water.material = low || !tile.water.hasLake ? this.water.lowMaterial : this.water.material;
     }
   }
 

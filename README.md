@@ -1,6 +1,6 @@
 # Cozy Roads
 
-A local Three.js driving prototype. **The Open Road** keeps generating a road through lake basins, pine forests, rolling hills, and alpine mountains as you drive.
+A Three.js driving game. **The Open Road** keeps generating a road through lake basins, pine forests, river valleys, and alpine mountains as you drive. [Play Cozy Roads](https://edwardjsun.com/cozy-roads/)
 
 ## Run locally
 
@@ -11,13 +11,13 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. **Esc** pauses the drive. Manual steering works on and off the road. Gravity changes your speed on hills. Fast crests can lift the tires, and steering takes effect again when they land. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
+Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. **Esc** pauses the drive. Manual steering works on and off the road. Gravity changes your speed on slopes. The suspension absorbs small crests. A fast drop can still lift all four tires, and steering takes effect again at contact. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
 
 ## Explore a world
 
 The default seed is `83472`. Choose **New world** from the start or pause screen to generate another seed. Share or reload the resulting URL to reproduce its road and scenery. You can also enter a seed directly, for example `?seed=275`. **Restart** returns to the beginning of the current seed.
 
-Landscape types blend along a continuous height field. Lakes occupy enclosed basins, and the road follows the same elevation as the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
+Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. On the default seed, a broad river valley opens around 1.7 km, with the water on the left as you drive forward. The road follows the terrain beneath it. A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
 
 ## Vehicles
 

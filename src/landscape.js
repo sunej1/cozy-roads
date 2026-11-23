@@ -93,12 +93,18 @@ export function skyEnvironment() {
   return map;
 }
 
-export function makeWater(sunVisibility) {
+export function makeWater(sunVisibility, bedrock) {
   const clock = uniform(0);
   const anchor = new THREE.Object3D();
   anchor.rotation.x = -Math.PI / 2;
   const planar = reflector({ target: anchor, resolutionScale: 0.50, bounces: false, samples: 0 });
+  const flow = attribute('flow', 'vec2');
   const p = positionWorld.xz;
+  // Crossfade two short drifts so bends never stretch the ripples over a long drive.
+  const phase = clock.mul(0.27).fract();
+  const drift = t => texture(mineralNoise, p.sub(flow.mul(t).mul(4.2)).mul(0.031)).gb;
+  const eddies = mix(drift(phase), drift(phase.add(0.5).fract()), phase.mul(2).sub(1).abs());
+  const current = flow.length().clamp(0, 1);
   const view = cameraPosition.sub(positionWorld).normalize();
   const distance = cameraPosition.sub(positionWorld).length();
   const wind = dot(p, vec2(0.034, 0.073)).sub(clock.mul(0.16)).sin();
@@ -112,13 +118,17 @@ export function makeWater(sunVisibility) {
   const ripple = vec2(wave1.cos().mul(0.026).add(wave2.sin().mul(0.024), wave4.sin().mul(0.022), wave5.sin().mul(0.017)),
     wave2.cos().mul(0.027).add(wave3.sin().mul(0.025), wave4.cos().mul(0.026), wave5.cos().mul(0.020)))
     .mul(waveFalloff.mul(0.83).add(0.17)).toVar();
-  const waterNormal = vec3(ripple.x, 1, ripple.y).normalize();
+  const disturbance = ripple.add(eddies.sub(0.5).mul(0.33, current, waveFalloff));
+  const waterNormal = vec3(disturbance.x, 1, disturbance.y).normalize();
   const fresnel = dot(waterNormal, view).clamp(0, 1).oneMinus().pow(5).mul(0.97).add(0.025);
   const bank = attribute('shore', 'float');
   const shallows = smoothstep(1.2, 21, bank).oneMinus().mul(smoothstep(-2, 1, bank));
   const bankRipples = wave3.add(wave2.sin().mul(0.52)).sin().mul(0.5).add(0.5);
   const shoal = mix(color('#506f62'), color('#96a782'), bankRipples.mul(0.37));
   const lakeColor = mix(color('#153d49'), shoal, shallows.mul(0.90));
+  const gravel = texture(bedrock, p.mul(0.51).add(disturbance.mul(0.28))).b;
+  const riverBed = mix(color('#485749'), color('#919377'), gravel);
+  const riverColor = mix(riverBed, color('#244e51'), smoothstep(-2, 12, bank));
   const surfaceScatter = wave1.sin().mul(0.56).add(wave2.sin().mul(0.23)).mul(waveFalloff).mul(0.025);
   const sunlight = vec3(SUN.x, SUN.y, SUN.z);
   const glint = dot(waterNormal, sunlight.add(view).normalize()).max(0).pow(190).mul(1.12, sunVisibility);
@@ -132,11 +142,13 @@ export function makeWater(sunVisibility) {
   const waveFront = bank.mul(3.5).add(wave1.sin().mul(0.69)).sub(clock.mul(2.7)).cos().max(0).pow(9);
   const foamEdge = smoothstep(1.1, 3.5, bank).oneMinus().mul(smoothstep(0, 0.5, bank)).mul(waveFront).mul(0.30);
 
+  const riffles = smoothstep(0.64, 0.82, eddies.y).mul(eddies.x, current, shallows, waveFalloff, 0.23);
   const material = new THREE.MeshBasicNodeMaterial();
   const lowMaterial = new THREE.MeshBasicNodeMaterial();
   for (const [surface, reflection] of [[material, path], [lowMaterial, skyTint]]) {
-    surface.colorNode = mix(lakeColor.mul(sunVisibility.mul(0.26).add(0.74)), reflection, fresnel.mul(0.89))
-      .add(surfaceScatter).add(color('#ffce92').mul(glint).mul(1.28)).add(color('#b9afa0').mul(foamEdge));
+    surface.colorNode = mix(mix(lakeColor, riverColor, current).mul(sunVisibility.mul(0.26).add(0.74)),
+      mix(reflection, skyTint, current), fresnel.mul(0.89))
+      .add(surfaceScatter).add(color('#ffce92').mul(glint).mul(1.28)).add(color('#b9afa0').mul(foamEdge.mul(current.oneMinus()).add(riffles)));
   }
 
   return { anchor, clock, material, lowMaterial, reflector: planar.reflector };
@@ -296,7 +308,7 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
   const canopy = mix(color('#273e38'), color('#566449'), field.b.mul(0.6).add(grain.g.mul(0.4)));
   const drifts = mix(color('#b1c3cf'), color('#faf8ef'), field.g.mul(0.38).add(0.46));
   const coarse = mix(mix(mix(meadow, canopy, forest), stone, exposed), drifts, snow);
-  const offsets = attribute('groundOffsets', 'vec2');
+  const offsets = attribute('groundOffsets', 'vec3');
   const roadside = offsets.x.abs();
   const gravel = texture(bedrock, p.xz.mul(0.64)).b;
   const shoulder = smoothstep(ROAD_EDGE + 0.26, ROAD_EDGE + 1.24, roadside
@@ -304,7 +316,7 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, low = fals
     .mul(smoothstep(140, 240, zoom).oneMinus());
   const aggregate = mix(color('#53524b'), color('#a69c82'), gravel);
   const strand = smoothstep(-8.0, -2.4, offsets.y.add(field.b.sub(0.5).mul(4.6)))
-    .mul(smoothstep(1.8, 5.2, p.y).oneMinus());
+    .mul(smoothstep(1.8, 5.2, p.y.sub(offsets.z)).oneMinus());
   const wet = smoothstep(-3.8, 0.0, offsets.y);
   const pebbles = mix(color('#655e4d'), color('#b4a58a'), gravel).mul(wet.mul(-0.44).add(1));
   material.colorNode = mix(mix(coarse, pebbles, strand), aggregate, shoulder).mul(grain.a.mul(0.14).add(grain.b.mul(0.12), 0.87));

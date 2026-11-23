@@ -46,6 +46,7 @@ export function newCarState(world) {
 
 export function joinRoad(car, world) {
   car.clearance = 0;
+  car.extension = 0;
   car.verticalSpeed = 0;
   car.pitch = car.roll = null;
   alignToRoad(car, world);
@@ -60,23 +61,23 @@ function alignToRoad(car, world) {
 
 export function surfaceAt(car, world, height) {
   const roadDistance = Math.abs(car.x - world.centerX(car.s));
-  if (height(car.s, car.x) < -0.02) return 'Shallows';
   if (roadDistance <= ROAD_EDGE) return 'Pavement';
+  if (height(car.s, car.x) < (world.waterLevel?.(car.s, car.x) ?? 0) - 0.02) return 'Shallows';
   return roadDistance <= ROAD_EDGE + 3 ? 'Gravel' : 'Off road';
 }
 
-export function groundPose(s, x, heading, height, vehicle) {
+export function groundPose(s, x, heading, height, vehicle, waterLevel = 0) {
   const fx = Math.sin(heading), fs = Math.cos(heading);
   const axle = vehicle.wheelbase * 0.5, side = vehicle.width * 0.46;
-  const front = height(s + fs * axle, x + fx * axle);
-  const rear = height(s - fs * axle, x - fx * axle);
-  const right = height(s - fx * side, x + fs * side);
-  const left = height(s + fx * side, x - fs * side);
-  const grade = (front - rear) / vehicle.wheelbase;
+  const wheel = (along, across) => height(s + fs * along - fx * across, x + fx * along + fs * across);
+  const fl = wheel(axle, -side), fr = wheel(axle, side);
+  const rl = wheel(-axle, -side), rr = wheel(-axle, side);
+  const grade = (fl + fr - rl - rr) / (2 * vehicle.wheelbase);
   return {
-    y: Math.max(-vehicle.ford, mix(height(s, x), (front + rear + right + left) * 0.25, 0.68)),
+    y: Math.max(waterLevel - vehicle.ford, (fl + fr + rl + rr) * 0.25),
     pitch: clamp(Math.atan(grade), -0.78, 0.78),
-    roll: clamp(Math.atan2(right - left, 2 * side), -0.68, 0.68),
+    roll: clamp(Math.atan2(fr + rr - fl - rl, 4 * side), -0.68, 0.68),
+    waterLevel,
     grade,
   };
 }
@@ -84,8 +85,8 @@ export function groundPose(s, x, heading, height, vehicle) {
 function manualStep(car, dt, input, world, height, vehicle, ground) {
   const speed = Math.abs(car.speed);
   const roughness = smooth(ROAD_EDGE - 0.2, ROAD_EDGE + 4.2, Math.abs(car.x - world.centerX(car.s)));
-  const grip = mix(1, vehicle.roughGrip, roughness) * (ground.y < 0 ? 0.59 : 1);
-  const maximum = vehicle.topSpeed * mix(1, 0.40 + vehicle.roughGrip * 0.39, roughness) * (ground.y < 0 ? 0.32 : 1);
+  const grip = mix(1, vehicle.roughGrip, roughness) * (ground.y < ground.waterLevel ? 0.59 : 1);
+  const maximum = vehicle.topSpeed * mix(1, 0.29 + vehicle.roughGrip * 0.29, roughness) * (ground.y < ground.waterLevel ? 0.32 : 1);
   const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   car.steering = mix(car.steering, steer, 1 - Math.exp(-(4.5 + vehicle.turn) * dt));
 
@@ -100,17 +101,21 @@ function manualStep(car, dt, input, world, height, vehicle, ground) {
     car.speed = Math.sign(driven) * Math.max(0, Math.abs(driven) - resistance * dt);
     if (input.throttle && !input.brake && driven < 0 && speed < 0.1) car.speed = 0;
     if (input.brake && !input.throttle && ((!reverse && driven < 0) || (reverse && driven > 0))) car.speed = 0;
-    car.speed = clamp(car.speed, -Math.min(8.5, maximum * 0.46), maximum);
+    const brakingLimit = speed - 4 * dt;
+    const forwardLimit = Math.max(maximum, brakingLimit);
+    const reverseLimit = Math.max(Math.min(8.5, maximum * 0.46), brakingLimit);
+    car.speed = clamp(car.speed, -reverseLimit, forwardLimit);
     const turn = vehicle.turn * grip * Math.tanh(Math.abs(car.speed) / 4.2) * (1 - 0.63 * smooth(6, 39, speed));
     car.heading += car.steering * turn * Math.sign(car.speed) * dt;
     car.heading = Math.atan2(Math.sin(car.heading), Math.cos(car.heading));
   }
 
-  const step = car.speed * dt;
+  const step = car.speed * dt / (car.clearance > 0 ? 1 : Math.hypot(1, ground.grade));
   const nextX = car.x + Math.sin(car.heading) * step, nextS = car.s + Math.cos(car.heading) * step;
   const nextHeight = height(nextS, nextX);
-  const aboveWater = car.clearance > 0 && ground.y + car.clearance > 0;
-  if (!aboveWater && nextHeight < -vehicle.ford && nextHeight < height(car.s, car.x)) {
+  const level = world.waterLevel?.(nextS, nextX) ?? 0;
+  const aboveWater = car.clearance > 0 && ground.y + car.extension + car.clearance > level;
+  if (!aboveWater && nextHeight < level - vehicle.ford && nextHeight < height(car.s, car.x)) {
     car.speed = 0;
     return;
   }
@@ -121,8 +126,8 @@ function manualStep(car, dt, input, world, height, vehicle, ground) {
 
 export function drive(car, dt, input, automatic, world, height, vehicle) {
   if (dt <= 0) return;
-  const ground = groundPose(car.s, car.x, car.heading, height, vehicle);
-  if (car.pitch === null) car.verticalSpeed = ground.grade * car.speed;
+  const ground = groundPose(car.s, car.x, car.heading, height, vehicle, world.waterLevel?.(car.s, car.x));
+  if (car.pitch === null) car.verticalSpeed = ground.grade * car.speed / Math.hypot(1, ground.grade);
   if (automatic) {
     car.speed = mix(car.speed, TOUR_SPEED, 1 - Math.exp(-1.65 * dt));
     car.s += car.speed * dt / world.routePose(car.s).length;
@@ -132,14 +137,28 @@ export function drive(car, dt, input, automatic, world, height, vehicle) {
     manualStep(car, dt, input, world, height, vehicle, ground);
   }
 
-  // The ground can push the tires up. A falling road cannot pull the car down.
-  const next = groundPose(car.s, car.x, car.heading, height, vehicle);
-  const freeHeight = ground.y + car.clearance + car.verticalSpeed * dt - 0.5 * GRAVITY * dt * dt;
-  car.clearance = Math.max(0, freeHeight - next.y);
-  const airborne = car.clearance > 0;
-  car.verticalSpeed = airborne ? car.verticalSpeed - GRAVITY * dt : (next.y - ground.y) / dt;
-  const pitch = airborne ? clamp(Math.atan2(car.verticalSpeed * Math.sign(car.speed), Math.max(4, Math.abs(car.speed))), -0.62, 0.62) : next.pitch;
-  const follow = 1 - Math.exp(-(airborne ? 2.8 : 16) * dt);
-  car.pitch = mix(car.pitch ?? ground.pitch, pitch, follow);
-  car.roll = mix(car.roll ?? ground.roll, airborne ? 0 : next.roll, follow);
+  const next = groundPose(car.s, car.x, car.heading, height, vehicle, world.waterLevel?.(car.s, car.x));
+  const wasAirborne = car.clearance > 0;
+  const travel = 0.06 + vehicle.suspension * 0.18;
+  const stiffness = GRAVITY / travel;
+  const supportSpeed = (next.y - ground.y) / dt;
+  // Loaded springs support the body at rest. Fully extended wheels exert no force.
+  const support = wasAirborne ? 0 : Math.max(0, stiffness * (travel - car.extension)
+    + 1.7 * Math.sqrt(stiffness) * (supportSpeed - car.verticalSpeed));
+  const acceleration = support - GRAVITY;
+  const offset = car.extension + car.clearance + (car.verticalSpeed - supportSpeed) * dt + 0.5 * acceleration * dt * dt;
+  car.verticalSpeed += acceleration * dt;
+  car.extension = clamp(offset, -travel * 0.8, travel);
+  car.clearance = Math.max(0, offset - travel);
+  if (offset < -travel * 0.8) car.verticalSpeed = Math.max(car.verticalSpeed, supportSpeed);
+  if (!automatic) {
+    if (!wasAirborne && car.clearance > 0) car.speed /= Math.hypot(1, ground.grade);
+    if (wasAirborne && car.clearance === 0) {
+      car.speed = (car.speed + car.verticalSpeed * next.grade) / Math.hypot(1, next.grade);
+    }
+  }
+  // Gravity accelerates the center of mass without pitching the nose toward the ground.
+  const follow = car.clearance > 0 ? 0 : 1 - Math.exp(-13 * dt);
+  car.pitch = mix(car.pitch ?? ground.pitch, next.pitch, follow);
+  car.roll = mix(car.roll ?? ground.roll, next.roll, follow);
 }

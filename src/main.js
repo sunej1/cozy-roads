@@ -92,7 +92,7 @@ function setMode(next) {
 
   if (mode === 'ready') {
     ui['intro-title'].textContent = 'The Open Road';
-    ui['intro-description'].textContent = 'An endless drive through forests, lakes, hills, and mountains.';
+    ui['intro-description'].textContent = 'An endless drive through forests, lakes, river valleys, and mountains.';
     ui.start.textContent = 'Start drive';
     ui.auto.textContent = 'Auto-drive';
   } else if (mode === 'paused') {
@@ -163,12 +163,13 @@ function poseScene(blend) {
   const forwardX = Math.sin(heading);
   const forwardS = Math.cos(heading);
   const y = height(s, x);
-  const ground = groundPose(s, x, heading, height, vehicle);
+  const ground = groundPose(s, x, heading, height, vehicle, world.waterLevel(s, x));
   const lift = mix(previousPose.clearance ?? 0, car.clearance, alpha);
+  const extension = mix(previousPose.extension ?? 0, car.extension, alpha);
   const pitch = mix(previousPose.pitch ?? ground.pitch, car.pitch ?? ground.pitch, alpha);
   const roll = mix(previousPose.roll ?? ground.roll, car.roll ?? ground.roll, alpha);
   const bodyLean = (1 - clamp(lift / 0.2, 0, 1)) * car.steering * clamp(Math.abs(car.speed) / 26, 0, 1) * (0.14 - vehicle.suspension * 0.09);
-  model.root.position.set(x, ground.y + lift, -s);
+  model.root.position.set(x, ground.y + extension + lift, -s);
   model.contactShadow.position.set(x, ground.y + 0.045, -s);
   model.contactShadow.rotation.set(ground.pitch, -heading, ground.roll, 'YXZ');
   model.shadowStrength.value = 0.53 / (1 + lift * 3);
@@ -176,7 +177,8 @@ function poseScene(blend) {
   driverEye.value.y += 0.88;
   model.brake(mode === 'driving' && input.brake && car.speed >= 0);
   model.root.rotation.set(pitch, -heading, roll + bodyLean);
-  for (const { pivot, wheel, front } of model.tires) {
+  for (const { pivot, wheel, front, restY } of model.tires) {
+    pivot.position.y = restY - extension;
     pivot.rotation.y = front ? -car.steering * 0.38 : 0;
     wheel.rotation.x = -mix(previousPose.wheelTurn ?? wheelTurn, wheelTurn, alpha);
   }
