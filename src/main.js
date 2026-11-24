@@ -196,20 +196,21 @@ function poseScene(blend) {
   }
 
   const y = model.root.position.y;
+  const chaseBack = 6.15;
+  const chaseHeight = 2.10;
   if (mode === 'ready' || automatic) {
     const intro = mode === 'ready';
     const lookAhead = intro ? 34 : 17;
-    const back = intro ? 9.7 : 7.75;
-    desiredCamera.set(world.centerX(s - back) + LANE_CENTER + (intro ? 3.15 : 1.10), y + (intro ? 3.52 : 2.92), -s + back);
+    const back = intro ? 9.7 : chaseBack;
+    desiredCamera.set(world.centerX(s - back) + LANE_CENTER + (intro ? 3.15 : 0.40), y + (intro ? 3.52 : chaseHeight), -s + back);
     const lake = intro && world.biomeAt(s).lake;
     desiredTarget.set(world.centerX(s + lookAhead) + LANE_CENTER + (lake ? lake.side * 21 : 0),
       world.roadHeight(s + lookAhead) + (intro ? 4.7 : 1.55), -s - lookAhead);
   } else {
-    const back = 7.95;
-    const shoulder = 0.74;
-    const cameraX = x - forwardX * back + forwardS * shoulder;
-    const cameraS = s - forwardS * back - forwardX * shoulder;
-    let cameraY = Math.max(y + 2.97, height(cameraS, cameraX) + 1.7);
+    const shoulder = 0.40;
+    const cameraX = x - forwardX * chaseBack + forwardS * shoulder;
+    const cameraS = s - forwardS * chaseBack - forwardX * shoulder;
+    let cameraY = Math.max(y + chaseHeight, height(cameraS, cameraX) + 1.7);
     const roof = model.root.position.y + 1.35;
     for (const t of [.25, .5, .75]) {
       const ground = height(mix(s, cameraS, t), mix(x, cameraX, t));
@@ -221,8 +222,8 @@ function poseScene(blend) {
     const groundAhead = height(targetS, targetX);
     desiredCamera.set(cameraX, cameraY, -cameraS);
     const aim = y + 1.8 + clamp(groundAhead - y, -3, 5) * .38;
-    const roofAngle = Math.atan2(roof - cameraY, back);
-    const framed = cameraY + (back + ahead) * Math.tan(roofAngle + .17);
+    const roofAngle = Math.atan2(roof - cameraY, chaseBack);
+    const framed = cameraY + (chaseBack + ahead) * Math.tan(roofAngle + .17);
     desiredTarget.set(targetX, Math.min(aim, framed), -targetS);
   }
   // Carry the chase rig with the car so uneven frame intervals cannot pump its following distance.
