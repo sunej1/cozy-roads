@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. Hold **Q/E** or drag the scenery to glance sideways. Release to face the road again. Looking around also works during auto-drive. **Esc** pauses the drive. Manual steering works on and off the road. Gravity changes your speed on slopes. The suspension absorbs small crests. A fast drop can still lift all four tires, and steering takes effect again at contact. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
+Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. Move the mouse to look around, or drag the scenery on a touchscreen. The view stays where you leave it while parked. While driving, including in reverse or on auto-drive, it eases forward after three seconds without look input. **Esc** pauses the drive. Manual steering works on and off the road. Gravity changes your speed on slopes. The suspension absorbs small crests. A fast drop can still lift all four tires, and steering takes effect again at contact. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
 
 ## Explore a world
 

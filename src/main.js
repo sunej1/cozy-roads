@@ -22,13 +22,14 @@ const ui = Object.fromEntries([
 const graph = ui.graph.getContext('2d');
 const keyMap = new Map(Object.entries({
   KeyW: 'throttle', ArrowUp: 'throttle', KeyS: 'brake', ArrowDown: 'brake',
-  KeyQ: 'lookLeft', KeyE: 'lookRight',
   KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
 }));
 const keyboard = new Set();
 const pointers = new Map();
-const input = { throttle: false, brake: false, left: false, right: false, lookLeft: false, lookRight: false };
-let glancePointer = null, glanceStart = 0, dragLook = 0;
+const input = { throttle: false, brake: false, left: false, right: false };
+let touchLookPointer = null;
+let lookX = null, lookY = 0;
+let lookYaw = 0, lookPitch = 0, lastLookTime = 0;
 const recent = new RecentFrames();
 const resolutionBudget = new ResolutionBudget();
 const cameraTarget = new THREE.Vector3();
@@ -85,8 +86,9 @@ function setMode(next) {
   resetTime();
   keyboard.clear();
   pointers.clear();
-  glancePointer = null;
-  dragLook = 0;
+  touchLookPointer = null;
+  lookX = null;
+  lookYaw = lookPitch = 0;
   ui.intro.hidden = isMoving();
   ui.pause.hidden = !isMoving();
   ui.pause.textContent = mode === 'benchmark' ? 'Cancel run' : 'Pause';
@@ -223,14 +225,6 @@ function poseScene(blend) {
     const framed = cameraY + (back + ahead) * Math.tan(roofAngle + .17);
     desiredTarget.set(targetX, Math.min(aim, framed), -targetS);
   }
-  if (mode === 'driving') {
-    const yaw = clamp(Number(input.lookRight) - Number(input.lookLeft) + dragLook, -1, 1) * 0.99;
-    if (yaw) {
-      const dx = desiredTarget.x - desiredCamera.x, dz = desiredTarget.z - desiredCamera.z;
-      desiredTarget.x = desiredCamera.x + dx * Math.cos(yaw) - dz * Math.sin(yaw);
-      desiredTarget.z = desiredCamera.z + dx * Math.sin(yaw) + dz * Math.cos(yaw);
-    }
-  }
   // Carry the chase rig with the car so uneven frame intervals cannot pump its following distance.
   if (blend < 1) {
     camera.position.x += x - lastAnchor.x;
@@ -246,6 +240,10 @@ function poseScene(blend) {
   }
   cameraTarget.lerp(desiredTarget, blend);
   camera.lookAt(cameraTarget);
+  if (mode === 'driving') {
+    camera.rotation.y -= lookYaw;
+    camera.rotation.x = clamp(camera.rotation.x + lookPitch, -1.45, 1.45);
+  }
 }
 
 function applyLook() {
@@ -492,6 +490,14 @@ function frame(now) {
   } else if (mode === 'driving' && delta > 0) {
     recent.add(delta);
     advance(Math.min(delta / 1000, 0.13));
+    if (Math.abs(car.speed) < 0.1 || touchLookPointer !== null) {
+      lastLookTime = now;
+    } else if (now > lastLookTime + 3000) {
+      const elapsed = Math.min(delta, now - lastLookTime - 3000);
+      const retain = Math.exp(-elapsed / 250);
+      lookYaw = Math.abs(lookYaw) < 0.001 ? 0 : lookYaw * retain;
+      lookPitch = Math.abs(lookPitch) < 0.001 ? 0 : lookPitch * retain;
+    }
   }
 
   if (isMoving() || needsRender) {
@@ -564,8 +570,8 @@ function bindControls() {
   window.addEventListener('blur', () => {
     keyboard.clear();
     pointers.clear();
-    glancePointer = null;
-    dragLook = 0;
+    touchLookPointer = null;
+    lookX = null;
   });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) return;
@@ -573,17 +579,38 @@ function bindControls() {
     else if (mode === 'driving') pauseDrive();
     resetTime();
   });
+  function trackPointer(event) {
+    lookX = event.clientX;
+    lookY = event.clientY;
+  }
+  canvas.addEventListener('pointerenter', event => {
+    if (event.pointerType === 'mouse' && touchLookPointer === null) trackPointer(event);
+  });
+  canvas.addEventListener('pointerleave', event => {
+    if (event.pointerType === 'mouse' && touchLookPointer === null) lookX = null;
+  });
   canvas.addEventListener('pointerdown', event => {
-    if (mode !== 'driving' || glancePointer !== null || event.button !== 0) return;
-    glancePointer = event.pointerId;
-    glanceStart = event.clientX;
+    if (mode !== 'driving' || event.pointerType === 'mouse' || touchLookPointer !== null || event.button !== 0) return;
+    touchLookPointer = event.pointerId;
+    trackPointer(event);
     canvas.setPointerCapture(event.pointerId);
   });
   canvas.addEventListener('pointermove', event => {
-    if (event.pointerId === glancePointer) dragLook = (glanceStart - event.clientX) / (canvas.clientWidth * 0.32);
+    const mouse = event.pointerType === 'mouse' && touchLookPointer === null;
+    if (mode !== 'driving' || (!mouse && event.pointerId !== touchLookPointer)) return;
+    if (lookX !== null && (event.clientX !== lookX || event.clientY !== lookY)) {
+      const sensitivity = (mouse ? 1 : -1) * Math.PI / canvas.clientWidth;
+      lookYaw = clamp(lookYaw + (event.clientX - lookX) * sensitivity, -1.8, 1.8);
+      lookPitch = clamp(lookPitch - (event.clientY - lookY) * sensitivity, -0.8, 0.8);
+      lastLookTime = performance.now();
+    }
+    trackPointer(event);
   });
   canvas.addEventListener('lostpointercapture', event => {
-    if (event.pointerId === glancePointer) { glancePointer = null; dragLook = 0; }
+    if (event.pointerId !== touchLookPointer) return;
+    touchLookPointer = null;
+    lookX = null;
+    lastLookTime = performance.now();
   });
   for (const button of ui.touch.querySelectorAll('button')) {
     button.addEventListener('pointerdown', event => {
@@ -613,6 +640,7 @@ async function initialize() {
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#aec5c6');
   camera = new THREE.PerspectiveCamera(59, 1, 0.25, 16800);
+  camera.rotation.order = 'YXZ';
   renderer.shadowMap.enabled = true;
   landscape = new WorldView(scene, assets, world, camera);
   ui.seed.textContent = 'World seed ' + world.seed;
