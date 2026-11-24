@@ -33,6 +33,9 @@ let lookYaw = 0, lookPitch = 0, lastLookTime = 0;
 const recent = new RecentFrames();
 const resolutionBudget = new ResolutionBudget();
 const cameraTarget = new THREE.Vector3();
+const chasePosition = new THREE.Vector3();
+const orbitPivot = new THREE.Vector3();
+const orbit = new THREE.Spherical();
 const lastAnchor = new THREE.Vector2();
 const previousPose = {};
 const desiredCamera = new THREE.Vector3();
@@ -82,6 +85,7 @@ function resetTime() {
 function setMode(next) {
   recoveryMessageUntil = 0;
   mode = next;
+  if (next !== 'driving' && document.pointerLockElement === canvas) document.exitPointerLock();
   needsRender = true;
   resetTime();
   keyboard.clear();
@@ -228,22 +232,38 @@ function poseScene(blend) {
   }
   // Carry the chase rig with the car so uneven frame intervals cannot pump its following distance.
   if (blend < 1) {
-    camera.position.x += x - lastAnchor.x;
-    camera.position.z -= s - lastAnchor.y;
+    chasePosition.x += x - lastAnchor.x;
+    chasePosition.z -= s - lastAnchor.y;
     cameraTarget.x += x - lastAnchor.x;
     cameraTarget.z -= s - lastAnchor.y;
   }
   lastAnchor.set(x, s);
-  camera.position.lerp(desiredCamera, blend);
+  chasePosition.lerp(desiredCamera, blend);
   if (mode !== 'ready' && !automatic) {
-    camera.position.y = Math.max(camera.position.y, height(-camera.position.z, camera.position.x) + 1.2,
-      world.waterLevel(-camera.position.z, camera.position.x) + 0.7);
+    chasePosition.y = Math.max(chasePosition.y, height(-chasePosition.z, chasePosition.x) + 1.2,
+      world.waterLevel(-chasePosition.z, chasePosition.x) + 0.7);
   }
   cameraTarget.lerp(desiredTarget, blend);
+  camera.position.copy(chasePosition);
   camera.lookAt(cameraTarget);
   if (mode === 'driving') {
-    camera.rotation.y -= lookYaw;
-    camera.rotation.x = clamp(camera.rotation.x + lookPitch, -1.45, 1.45);
+    orbitPivot.set(x, y + 0.95, -s);
+    orbit.setFromVector3(camera.position.sub(orbitPivot));
+    // Keep the car at its usual height in the frame as the camera circles it.
+    const framingPitch = camera.rotation.x + Math.PI / 2 - orbit.phi;
+    orbit.theta += lookYaw;
+    orbit.phi = clamp(orbit.phi - lookPitch, 0.15, Math.PI * 0.55);
+    camera.position.setFromSpherical(orbit).add(orbitPivot);
+    if (lookYaw || lookPitch) {
+      const cx = camera.position.x, cs = -camera.position.z;
+      camera.position.y = Math.max(camera.position.y, height(cs, cx) + 0.65, world.waterLevel(cs, cx) + 0.7);
+      for (const t of [.25, .5, .75]) {
+        const ridge = height(mix(s, cs, t), mix(x, cx, t)) + 0.35;
+        camera.position.y = Math.max(camera.position.y, orbitPivot.y + (ridge - orbitPivot.y) / t);
+      }
+    }
+    camera.lookAt(orbitPivot);
+    camera.rotateX(framingPitch);
   }
 }
 
@@ -584,6 +604,7 @@ function bindControls() {
     lookX = event.clientX;
     lookY = event.clientY;
   }
+  document.addEventListener('pointerlockchange', () => { lookX = null; });
   canvas.addEventListener('pointerenter', event => {
     if (event.pointerType === 'mouse' && touchLookPointer === null) trackPointer(event);
   });
@@ -591,7 +612,11 @@ function bindControls() {
     if (event.pointerType === 'mouse' && touchLookPointer === null) lookX = null;
   });
   canvas.addEventListener('pointerdown', event => {
-    if (mode !== 'driving' || event.pointerType === 'mouse' || touchLookPointer !== null || event.button !== 0) return;
+    if (mode !== 'driving' || touchLookPointer !== null || event.button !== 0) return;
+    if (event.pointerType === 'mouse') {
+      canvas.requestPointerLock?.()?.catch(() => {});
+      return;
+    }
     touchLookPointer = event.pointerId;
     trackPointer(event);
     canvas.setPointerCapture(event.pointerId);
@@ -599,10 +624,14 @@ function bindControls() {
   canvas.addEventListener('pointermove', event => {
     const mouse = event.pointerType === 'mouse' && touchLookPointer === null;
     if (mode !== 'driving' || (!mouse && event.pointerId !== touchLookPointer)) return;
-    if (lookX !== null && (event.clientX !== lookX || event.clientY !== lookY)) {
+    const locked = document.pointerLockElement === canvas;
+    const dx = locked ? event.movementX : lookX === null ? 0 : event.clientX - lookX;
+    const dy = locked ? event.movementY : lookX === null ? 0 : event.clientY - lookY;
+    if (dx || dy) {
       const sensitivity = (mouse ? 1 : -1) * Math.PI / canvas.clientWidth;
-      lookYaw = clamp(lookYaw + (event.clientX - lookX) * sensitivity, -1.8, 1.8);
-      lookPitch = clamp(lookPitch - (event.clientY - lookY) * sensitivity, -0.8, 0.8);
+      const yaw = lookYaw + dx * sensitivity * (locked ? 1 : 2.5);
+      lookYaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+      lookPitch = clamp(lookPitch - dy * sensitivity, -0.35, 1.15);
       lastLookTime = performance.now();
     }
     trackPointer(event);
