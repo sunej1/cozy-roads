@@ -20,6 +20,7 @@ export class Meadow {
     this.leafLevels = leafLevels;
     this.cameraPosition = cameraPosition;
     this.cells = new Map();
+    this.showFlowers = true;
   }
 
   plant(cx, cs, low) {
@@ -77,6 +78,7 @@ export class Meadow {
       }
       flowers.computeBoundingSphere();
       flowers.receiveShadow = true;
+      flowers.visible = this.showFlowers;
       this.scene.add(flowers);
     }
     return { mesh, flowers, cx, cs, low };
@@ -125,7 +127,7 @@ export class Meadow {
       const ds = Math.max(s * CELL - car.s, car.s - (s + 1) * CELL, 0);
       const d2 = dx * dx + ds * ds;
       mesh.visible = d2 < reach * reach;
-      if (cell.flowers) cell.flowers.visible = mesh.visible;
+      if (cell.flowers) cell.flowers.visible = this.showFlowers && mesh.visible;
       if (!cell.blades && this.leafLevels.length && d2 < (bladeRange.value.y + 8) ** 2) {
         cell.blades = this.leafGroups(cell);
       }

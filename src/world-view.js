@@ -1,11 +1,13 @@
-import { cameraPosition, color, diffuseColor, dot, luminance, mix as mixColor, positionWorld, shadow, smoothstep, texture, uniform, vec3 } from 'three/tsl';
+import { attribute, cameraPosition, color, diffuseColor, dot, luminance, normalWorldGeometry, mix as mixColor, positionWorld, shadow, smoothstep, texture, uniform, uv, vec3, vec4 } from 'three/tsl';
 import { mountainLight } from './mountain-light.js';
 import { canopyShade } from './canopy-shade.js';
 import { GrassTracks } from './grass-tracks.js';
 import { cloudLayer } from './clouds.js';
-import { Horizon } from './horizon.js';
+import { SnowSurface } from './snow.js';
+import { daylight, seasons } from './climate.js';
+import { Horizon, horizonRange } from './horizon.js';
 import { wayside } from './wayside.js';
-import { Treeline } from './treeline.js';
+import { Treeline, timberline } from './treeline.js';
 import { Meadow, MEADOW_DETAIL_LAYER } from './meadow.js';
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -178,7 +180,11 @@ function scatter(world, tile, chunkId, band, start, scans, conifer, rockMaterial
     const lookOut = row.turnout * Math.sign(lateral) > 2 && Math.abs(lateral) < 48;
     const grade = Math.hypot(tileSurface(tile, chunkId, s, row.x + lateral + 2, band) - y,
       tileSurface(tile, chunkId, s + 2, row.x + lateral, band) - y) / 2;
-    if (lookOut || grade > 0.98 + clearing * 0.24 || y < 3 || shore > -2 || y > 205 || random() > (0.15 + row.trees * .87) * (0.35 + clearing * 1.10)) continue;
+    const treeline = timberline(row, noise((row.x + lateral) / 125 + world.seed % 997, s / 152));
+    const alpineCover = 1 - smooth(treeline - 125, treeline, y);
+    const scoured = smooth(-34, -1, shore) * (1 - smooth(2, 9, y - (row.water?.level ?? 0)))
+      * Math.abs(row.water?.flow ?? 0);
+    if (lookOut || grade > 0.98 + clearing * 0.24 || y < 3 || shore > -2 || random() > alpineCover * (1 - 0.82 * scoured) * (0.15 + row.trees * .87) * (0.35 + clearing * 1.10)) continue;
     const scale = (0.65 + random() ** 1.5 * 1.27) * (1 - 0.36 * smooth(63, 151, y)) * (1 + woodland * 0.24);
     dummy.position.set(row.x + lateral, y - 0.26, -s);
     dummy.rotation.set((random() - 0.5) * 0.17, random() * Math.PI * 2, (random() - 0.5) * 0.11);
@@ -381,47 +387,72 @@ export class WorldView {
     applyMeadowWind(this.tracks, this.canopy);
     this.meadow = new Meadow(scene, world, (s,x) => this.surfaceHeight(s,x), assets.leafLevels, camera.position);
     this.cozy = uniform(1);
+    this.winter = uniform(0);
+    this.meadowColor = uniform(new THREE.Color(0xffffff));
+    this.sunDirection = uniform(SUN.clone());
+    this.skyTint = uniform(new THREE.Color(0xffffff));
+    this.airTint = uniform(new THREE.Color(0xffffff));
+    this.night = uniform(0);
+    this.snow = new SnowSurface(scene, world, (s,x) => this.surfaceHeight(s,x));
+    aspenMaterial.maskNode = this.winter.lessThan(0.5).or(uv().x.greaterThan(0.73));
+    const needles = texture(assets.canopy);
+    const frost = smoothstep(0.12, 0.62, normalWorldGeometry.y.add(needles.g.mul(0.65))).mul(this.winter,0.79);
+    coniferMaterial.colorNode = vec4(mixColor(needles.rgb, color('#d6e1e8'), frost),needles.a);
     const reliefMap = makeReliefTexture(assets.elevations);
-    this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy, this.canopy.cover);
-    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy, this.canopy.cover, true);
+    this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy, this.canopy.cover, this.winter, this.meadowColor);
+    this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy, this.canopy.cover, this.winter, this.meadowColor, true);
     for (const material of [this.terrainMaterial, this.lowTerrainMaterial, bladeMaterial, grassMaterial, flowerMaterial, understoryMaterial]) {
       material.aoNode = this.canopy.ambient;
     }
     this.horizon = new Horizon(scene, world, this.terrainMaterial, (id, band) => this.chunks.has(id + ':' + band));
     this.roadMaterial = new THREE.MeshStandardNodeMaterial({
-      vertexColors: true, map: assets.pavement, normalMap: assets.normal,
+      vertexColors: false, map: assets.pavement, normalMap: assets.normal,
       normalScale: new THREE.Vector2(0.58, 0.58), roughnessMap: assets.rough, roughness: 0.97,
     });
     const pavement = texture(assets.pavement);
     // Preserve the aggregate detail while weathering the brown binder toward grey.
-    this.roadMaterial.colorNode = mixColor(vec3(luminance(pavement.rgb)), pavement.rgb, 0.21).mul(1.53);
+    this.roadMaterial.colorNode = mixColor(vec3(luminance(pavement.rgb)), pavement.rgb, 0.21).mul(1.53, attribute('color','vec3'));
+    this.roadMaterial.colorNode = mixColor(this.roadMaterial.colorNode, color('#bbc9d6')
+      .mul(pavement.g.mul(0.24).add(0.88)), this.winter);
     const paintGrain = texture(assets.pavement, positionWorld.xz.div(5.8)).r;
     this.markingMaterial = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.91 });
+    this.markingMaterial.maskNode = this.winter.lessThan(0.5);
     this.markingMaterial.colorNode = vec3(smoothstep(0.017, 0.085, paintGrain).mul(0.45).add(0.51));
     this.rockMaterial = makeBoulderMaterial(assets.bedrock);
     this.rockModels = assets.rocks;
+    this.headlight = new THREE.SpotLight(0xffdfa6, 1450, 85, 0.42, 0.64, 1.85);
+    scene.add(this.headlight, this.headlight.target);
     this.sky = makeSky();
-    scene.environment = skyEnvironment();
+
     scene.environmentIntensity = 0.48;
 
     this.skyLight = new THREE.HemisphereLight('#c2d9f6', '#8a805b', 0.82);
     this.sun = new THREE.DirectionalLight('#ffdfb0', 4.45);
     this.sun.position.copy(SUN).multiplyScalar(125);
     this.sun.castShadow = true;
-    this.clouds = cloudLayer(this.sky, SUN, assets.clouds);
+    this.clouds = cloudLayer(this.sky, this.sunDirection, assets.clouds);
     const elevation = positionWorld.sub(cameraPosition).normalize().y;
     const horizonTint = mixColor(color('#f2bda3'), color('#acbfdc'), smoothstep(0.01, 0.54, elevation));
     const cloudlight = this.sky.material.colorNode;
     this.sky.material.colorNode = mixColor(cloudlight.rgb, cloudlight.rgb.mul(0.46).add(horizonTint.mul(0.75)),
-      this.cozy.mul(0.78));
-    this.mountainLight = mountainLight(world, SUN);
+      this.cozy.mul(0.78)).mul(this.skyTint);
+    const sight = positionWorld.sub(cameraPosition).normalize();
+    const moon = smoothstep(0.99988, 0.99997, dot(sight, this.sunDirection));
+    const starUV = sight.xz.div(sight.y.max(0).add(1)).mul(235);
+    const star = smoothstep(0.015, 0.12, starUV.fract().sub(0.5).length()).oneMinus()
+      .mul(dot(starUV.floor(),vec3(12.9898,78.233,0).xy).sin().mul(43758.55).fract().greaterThan(0.978),
+        smoothstep(0.12,0.48,sight.y));
+    const moonlit = mixColor(color('#394963'),color('#101d34'),smoothstep(0.01,0.65,sight.y))
+      .add(color('#c8d9f4').mul(moon.add(star.mul(0.38))));
+    this.sky.material.colorNode = mixColor(this.sky.material.colorNode,moonlit,this.night);
+    this.mountainLight = mountainLight(world, this.sunDirection.value);
     const sunlight = this.mountainLight.visibility.mul(this.clouds.shadow);
-    this.far = atmosphere(scene, this.mountainLight.visibilityAt, this.cozy);
-    const backlight = dot(positionWorld.sub(cameraPosition).normalize(), vec3(...SUN.toArray())).max(0).pow(3);
+    this.far = atmosphere(scene, this.mountainLight.visibilityAt, this.cozy, this.sunDirection, this.airTint);
+    const backlight = dot(positionWorld.sub(cameraPosition).normalize(), this.sunDirection).max(0).pow(3);
     for (const material of [grassMaterial, bladeMaterial, flowerMaterial, aspenMaterial]) {
-      material.emissiveNode = diffuseColor.rgb.mul(backlight.mul(sunlight, 0.53).add(0.19));
+      material.emissiveNode = diffuseColor.rgb.mul(backlight.mul(sunlight, 0.53).add(0.19).mul(this.airTint));
     }
-    this.water = makeWater(sunlight, assets.bedrock, this.cozy);
+    this.water = makeWater(sunlight, assets.bedrock, this.cozy, this.sunDirection, this.airTint);
     // The half-resolution lake keeps the meadow clumps. Individual blades only resolve in the main view.
     camera.layers.enable(MEADOW_DETAIL_LAYER);
     this.water.reflector.getVirtualCamera(camera).layers.disable(MEADOW_DETAIL_LAYER);
@@ -490,30 +521,51 @@ export class WorldView {
     return chunk ? tileSurface(chunk.tile, id, s, x, band) : this.world.terrainHeight(s, lateral);
   }
 
-  updateWater(first, last, x) {
+  updateWater(first, last, x, current) {
     const reach = (Math.floor(Math.abs(x) / 4096) + 4) * 4096;
     if (first === this.waterFirst && last === this.waterLast && reach === this.seaReach) return;
+    const range = Math.ceil(horizonRange(this.low) / CHUNK_LENGTH);
+    const near = id => id >= first && id <= last;
     for (const [id, mesh] of this.waterStrips) {
-      if (id >= first && id <= last && reach === this.seaReach) continue;
-      if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); }
+      if ((near(id) || (mesh?.userData.hasLake && Math.abs(id - current) <= range)) && reach === this.seaReach) continue;
+      if (mesh) { this.scene.remove(mesh); mesh.geometry.dispose(); mesh.children.forEach(child => child.dispose()); }
       this.waterStrips.delete(id);
     }
     this.waterFirst = first;
     this.waterLast = last;
     this.seaReach = reach;
-    for (let id = first; id <= last; id++) {
+    for (let id = current - range; id <= current + range; id++) {
       if (this.waterStrips.has(id)) continue;
+      if (!near(id)) {
+        const row = this.world.section((id + 0.5) * CHUNK_LENGTH);
+        if (!row.lakes.some(lake => lake.pastHead <= CHUNK_LENGTH / 2)) continue;
+      }
       const data = buildWater(this.world, id, reach);
       let mesh = null;
       if (data) {
         const surface = new THREE.BufferGeometry();
         surface.setAttribute('position', new THREE.BufferAttribute(data.position, 3));
+        surface.setAttribute('channel', new THREE.BufferAttribute(data.channel, 2));
+        surface.setAttribute('obstacle', new THREE.BufferAttribute(data.obstacle, 3));
         surface.setAttribute('flow', new THREE.BufferAttribute(data.flow, 3));
         surface.setAttribute('banks', new THREE.BufferAttribute(data.banks, 2));
         surface.setAttribute('waterDepth', new THREE.BufferAttribute(data.depth, 1));
         surface.setIndex(new THREE.BufferAttribute(data.index, 1));
         surface.computeVertexNormals();
-        mesh = new THREE.Mesh(surface, this.low ? this.water.lowMaterial : this.water.material);
+        mesh = new THREE.Mesh(surface, data.hasLake && !this.low ? this.water.material : this.water.lowMaterial);
+        mesh.userData.hasLake = data.hasLake;
+        if (data.boulders.length) {
+          const stones = new THREE.InstancedMesh(rock, this.rockMaterial, data.boulders.length);
+          for (const [i, b] of data.boulders.entries()) {
+            dummy.position.set(b.x, b.level - 0.32 * b.radius, -b.station);
+            dummy.rotation.set(0, b.angle, 0);
+            dummy.scale.set(b.radius, Math.max(b.radius, b.depth + 0.2), b.radius * 0.91);
+            dummy.updateMatrix();
+            stones.setMatrixAt(i, dummy.matrix);
+          }
+          stones.receiveShadow = true;
+          mesh.add(stones);
+        }
         this.scene.add(mesh);
       }
       this.waterStrips.set(id, mesh);
@@ -528,7 +580,7 @@ export class WorldView {
     const reach = low ? 9 : 12;
     const backwards = Math.ceil(mix(3, reach, smooth(-0.55, 0.36, -along)));
     const forwards = Math.ceil(mix(3, reach, smooth(-0.55, 0.36, along)));
-    this.updateWater(current - backwards, current + forwards, car.x);
+    this.updateWater(current - backwards, current + forwards, car.x, current);
     const sideRange = low ? 740 : 910;
     const left = terrainBand(lateral - sideRange - Math.max(0, -across) * 410);
     const right = terrainBand(lateral + sideRange + Math.max(0, across) * 410);
@@ -577,7 +629,8 @@ export class WorldView {
     this.mountainLight.update(car, eager);
     this.horizon.update(car, low, this.terrainRevision, eager);
     this.treeline.update(car, low, eager);
-    this.meadow.update(car, low, eager);
+    if (!this.winter.value) this.meadow.update(car, low, eager);
+    else if (eager) this.snow.update(car.x, -car.s);
     const currentBand = terrainBand(lateral);
     for (const { id, band, detail, trees, aspens, rocks, nearStones, scanned, shrubs, treeCount } of this.chunks.values()) {
       const rowDistance = Math.abs(id - current);
@@ -602,12 +655,43 @@ export class WorldView {
 
   setLook(cozy) {
     this.cozy.value = cozy ? 1 : 0;
-    this.skyLight.color.set(cozy ? '#e6d7ee' : '#c2d9f6');
-    this.skyLight.groundColor.set(cozy ? '#ada086' : '#8a805b');
-    this.skyLight.intensity = cozy ? 1.14 : 0.82;
-    this.sun.color.set(cozy ? '#ffdbad' : '#ffdfb0');
+    this.setClimate(this.season ?? 'autumn', this.timeOfDay ?? 'day');
+  }
+
+  setClimate(season, time) {
+    const light = daylight[time], plants = seasons[season];
+    if (time !== this.timeOfDay) {
+      this.sunDirection.value.fromArray(light.direction).normalize();
+      this.sky.sunPosition.value.copy(this.sunDirection.value).multiplyScalar(8000);
+      this.skyTint.value.set(light.sky);
+      this.airTint.value.set(light.air);
+      this.night.value = Number(time === 'night');
+      this.mountainLight.invalidate();
+      this.scene.environment?.dispose();
+      this.scene.environment = skyEnvironment(this.sunDirection.value, this.skyTint.value);
+    }
+    this.headlight.visible = time === 'night' || time === 'dusk';
+    this.timeOfDay = time;
+    this.skyLight.color.set(this.cozy.value ? '#e6d7ee' : '#c2d9f6').lerp(this.skyTint.value,0.35);
+    this.skyLight.groundColor.set(plants.winter ? '#bfcee0' : '#938970');
+    this.skyLight.intensity = (this.cozy.value ? 1.14 : 0.82) * light.ambient;
+    this.sun.color.set(light.sun);
     this.lowSun.color.copy(this.sun.color);
-    this.sun.intensity = this.lowSun.intensity = cozy ? 3.7 : 4.45;
+    this.sun.intensity = this.lowSun.intensity = light.power * (this.cozy.value ? 0.84 : 1);
+    if (this.winter.value && !plants.winter) this.snow.clear();
+    this.season = season;
+    this.winter.value = plants.winter;
+    this.meadowColor.value.set(plants.meadow);
+    aspenMaterial.color.set(plants.foliage);
+    grassMaterial.color.set(plants.grass);
+    bladeMaterial.color.copy(grassMaterial.color);
+    coniferMaterial.color.set(plants.winter ? '#c8d5db' : '#ffffff');
+    this.meadow.showFlowers = season === 'spring' || season === 'summer';
+    for (const {mesh, flowers, blades} of this.meadow.cells.values()) {
+      mesh.visible = !plants.winter;
+      if (flowers) flowers.visible = this.meadow.showFlowers;
+      if (plants.winter) for (const group of blades ?? []) group.visible = false;
+    }
   }
 
   setQuality(low) {
@@ -621,19 +705,25 @@ export class WorldView {
       groundMesh.material = low ? this.lowTerrainMaterial : this.terrainMaterial;
     }
     for (const water of this.waterStrips.values()) {
-      if (water) water.material = low ? this.water.lowMaterial : this.water.material;
+      if (water) water.material = water.userData.hasLake && !low ? this.water.material : this.water.lowMaterial;
     }
   }
 
   animate(time, camera, car) {
+    if (this.headlight.visible) {
+      const fx = Math.sin(car.heading), fs = Math.cos(car.heading);
+      const y = this.surfaceHeight(car.s,car.x) + (car.clearance || 0);
+      this.headlight.position.set(car.x+fx*2,y+0.91,-car.s-fs*2);
+      const ahead = this.surfaceHeight(car.s+fs*18,car.x+fx*18);
+      this.headlight.target.position.set(car.x+fx*24,y+(ahead-y)*1.33-0.12,-car.s-fs*24);
+    }
     this.sky.position.copy(camera.position);
     this.water.clock.value = time;
-    this.water.anchor.position.y = this.world.section(car.s).water?.level ?? 0;
     this.clouds.clock.value = time;
     const s = car.s + Math.cos(car.heading) * 31;
     const x = car.x + Math.sin(car.heading) * 31;
     this.sun.target.position.set(Math.round(x), Math.round(this.surfaceHeight(s, x)), -Math.round(s));
-    this.sun.position.copy(this.sun.target.position).addScaledVector(SUN, 125);
+    this.sun.position.copy(this.sun.target.position).addScaledVector(this.sunDirection.value, 125);
     this.lowSun.position.copy(this.sun.position);
   }
 }

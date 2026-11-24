@@ -87,7 +87,7 @@ test('terrain tiles match across boundaries regardless of build order', () => {
   assert.equal(lake.hasLake, true);
   assert.ok(river.flow.some((value, i) => i % 3 === 1 && value > 0.5));
   const next = buildWater(world, 7);
-  for (const [field, stride] of [['position', 39], ['flow', 39], ['depth', 13], ['banks', 26]]) {
+  for (const [field, stride] of [['position', 39], ['flow', 39], ['depth', 13], ['banks', 26], ['channel', 26], ['obstacle', 39]]) {
     assert.deepEqual(river[field].slice(-stride), next[field].slice(0, stride));
   }
 });
@@ -332,7 +332,8 @@ test('the shadow behind an isolated ridge follows the sun from either side of th
     sampleTerrain: (row, x) => Math.abs(x + 168) < 1 && Math.abs(row.s - 24) < 1 ? 1300 : 0,
   };
   for (const direction of [-1, 1]) {
-    const light = mountainLight(world, { x: -1, y: 0.5, z: direction });
+    const sun = { x: -1, y: 0.5, z: direction };
+    const light = mountainLight(world, sun);
     light.update({ x: 0, s: 0 }, true);
     let map;
     light.visibility.traverse(node => { if (node.isTextureNode) map = node.value; });
@@ -340,6 +341,11 @@ test('the shadow behind an isolated ridge follows the sun from either side of th
     const height = (x, s) => DataUtils.fromHalfFloat(data[Math.floor(s / 48 + width / 2) * width + Math.floor(x / 48 + width / 2)]);
     assert.ok(height(24, 24 + direction * 192) > 1000);
     assert.ok(height(24, 24 - direction * 192) < 1);
+    sun.x = 1;
+    light.invalidate();
+    light.update({ x: 0, s: 0 }, true);
+    assert.ok(height(-360, 24 + direction * 192) > 1000);
+    assert.ok(height(24, 24 + direction * 192) < 1);
   }
 });
 
@@ -458,7 +464,7 @@ test('seeded rivers run downhill into lakes on either side of a divide and keep 
   for (const seed of [0, DEFAULT_SEED, 4294967295]) {
     const world = createWorld(seed);
     let left = 0, right = 0, mouths = 0;
-    for (let s = -8200; s < 8200; s += 4) {
+    for (let s = -16 * REGION_LENGTH; s < 16 * REGION_LENGTH; s += 4) {
       const row = world.section(s), water = row.water;
       assert.ok(world.shoreDistance(row, 0) < -ROAD_EDGE);
       if (!water || Math.abs(water.flow) < 0.01 || water.source < 0.999) continue;
@@ -496,7 +502,7 @@ test('trail suspension absorbs small crests and preserves takeoff pitch over a d
 
 test('river valleys have a broad floor', () => {
   const world = createWorld();
-  const s = 1840, row = world.section(s);
+  const s = 4960, row = world.section(s);
   assert.equal(world.biomeAt(s).name, 'River valley');
   const drySide = -Math.sign(row.water.center);
   const floor = [25, 50, 75, 100].map(offset => world.sampleTerrain(row, drySide * offset));
@@ -506,7 +512,7 @@ test('river valleys have a broad floor', () => {
 
 test('every car can ford shallows and drive away after deep water at lake, river and fjord shores', () => {
   const world = createWorld();
-  for (const s of [0, 1840, 2800]) {
+  for (const s of [0, 4960, 6390]) {
     const row = world.section(s), id = Math.floor(s / CHUNK_LENGTH), tile = buildTerrain(world, id);
     const height = (station, x) => tileSurface(tile, id, station, x);
     for (const vehicle of Object.values(VEHICLES)) {
@@ -578,7 +584,9 @@ test('fjords have a deep tidal trough, a winding outlet, a widening sound and sl
         assert.ok(world.sampleTerrain(row, row.fjord.center) < (row === outer ? -60 : -25));
         const bank = inlet.side > 0 ? row.water.right : row.water.left;
         const shelf = world.sampleTerrain(row, bank + inlet.side * 25);
-        assert.ok(shelf >= 0 && shelf < 15);
+        assert.ok(shelf >= 0 && shelf < 40);
+        assert.ok(inlet.length * 2 / (outer.water.right - outer.water.left) > 7, 'long, narrow channel');
+        assert.ok(world.sampleTerrain(row, bank + inlet.side * 125) > (row === inner ? 150 : 80), 'near-water rock wall');
         assert.ok(world.sampleTerrain(row, bank + inlet.side * 80) > shelf + 8);
         if (row === inner) assert.ok(world.sampleTerrain(row, bank + inlet.side * 400) > 95);
         assert.ok(world.shoreDistance(row, 0) < -ROAD_EDGE);
@@ -693,38 +701,49 @@ test('the road follows surveyed dry ground, with bounded grades and local earthw
   }
 });
 
-test('a drive can enter and leave a two-sided mountain pass on different seeds', () => {
+test('the route climbs sustained mountain passes, crests between peaks and descends to another valley', () => {
   for (const seed of [0, DEFAULT_SEED, 999, 4294967295]) {
-    const world = createWorld(seed);
-    let passes = 0;
-    for (let index = -24; index <= 24; index++) {
-      const center = index * REGION_LENGTH;
-      if (world.biomeAt(center).name !== 'Alpine mountains') continue;
-      let inside = 0, nearestCliff = Infinity;
-      for (let ds = -112; ds <= 112; ds += 8) {
-        const row = world.section(center + ds);
-        const gains = [-1, 1].map(side => {
-          let rise = 0;
-          for (let d = 12; d <= 72; d += 4) {
-            const h = world.sampleTerrain(row, side * d) - row.grade;
-            rise = Math.max(rise, h);
-            if (h > 32) nearestCliff = Math.min(nearestCliff, d);
-          }
-          return rise;
-        });
-        if (Math.min(...gains) > 10 && Math.max(...gains) > 45) inside++;
-      }
-      if (inside < 8 || nearestCliff > 52) continue;
-      passes++;
-      const middle = world.section(center);
-      assert.ok(Math.abs(middle.x - middle.axis) > 32, 'the alignment physically turns into the hills');
-      for (const ds of [-270, 270]) {
-        const approach = world.section(center + ds);
-        assert.ok(Math.abs(approach.x - approach.axis) < 30);
+    const world = createWorld(seed), summits = new Set();
+    for (let s = -32000; s <= 32000; s += 128) {
+      const pass = world.section(s).pass;
+      if (!pass || summits.has(pass.summit)) continue;
+      summits.add(pass.summit);
+      const crest = world.section(pass.summit);
+      for (const direction of [-1, 1]) {
+        const bottom = world.section(pass.summit + direction * pass.run);
+        const slope = world.section(pass.summit + direction * pass.run * 0.52);
+        assert.ok(crest.grade - bottom.grade > 50 && slope.grade > bottom.grade + 13);
+        assert.ok(crest.grade > slope.grade + 15);
+        const shoulderPeak = Math.max(...[100, 150, 210, 270, 340].map(d => world.sampleTerrain(crest, d * direction)));
+        assert.ok(shoulderPeak > crest.grade + 95, 'the road crosses a saddle between two peaks');
+        const tributary = world.section(pass.summit + direction * pass.run * 0.84);
+        assert.equal(Math.sign(tributary.water.flow), -direction);
       }
     }
-    assert.ok(passes >= 2, 'several mountain drives on either side of station zero');
+    assert.ok(summits.size >= 4);
   }
+});
+
+test('river boulders intersect the bed and share the wake coordinates sampled on both sides of a tile seam', () => {
+  const world = createWorld(), directions = new Set();
+  let rocks = 0, curved = 0;
+  for (let id = -64; id < 64; id++) {
+    const strip = buildWater(world, id);
+    for (const b of strip?.boulders ?? []) {
+      const row = world.section(b.station), w = row.water;
+      assert.equal(Math.floor(b.station / CHUNK_LENGTH), id);
+      assert.ok(b.depth > 0 && b.depth <= b.radius * 1.25);
+      assert.ok(Math.abs(b.x - row.x - w.center - b.cross) < 0.001);
+      const i = Array.from(strip.position).findIndex((value, j) => j % 3 === 2 && Math.abs(-value - b.station) < 2.01);
+      assert.ok(i >= 2 && Math.abs(strip.obstacle[i] - b.radius) < 0.001);
+      assert.ok(Math.abs(strip.obstacle[i - 1] - b.cross) < 0.001);
+      directions.add(Math.sign(w.flow));
+      if (Math.abs(w.bend) > 0.55) curved++;
+      rocks++;
+    }
+  }
+  assert.equal(directions.size, 2);
+  assert.ok(rocks > 30 && curved > 8);
 });
 
 test('inlet headwalls and mountain transitions stay continuous in geographic coordinates', () => {
@@ -758,4 +777,29 @@ test('the water strip reaches dry rendered triangles on both sides of inland str
       }
     }
   }
+});
+
+test('snow compacts under moving tires and piles up on both sides across signed tile boundaries', async () => {
+  const { Snowpack } = await import('../src/snow.js');
+  for (const x of [-8,0,8]) {
+    const snow = new Snowpack();
+    for (let step=-30; step<=30; step++) snow.stamp(x, step*0.1, 0, 1, 0.24);
+    const first = snow.offset(x,0);
+    assert.ok(first < -0.10 && first > -0.24);
+    for (const side of [-1,1]) assert.ok(snow.offset(x+side*0.4,0) > 0.016);
+    for (let step=30; step>=-30; step--) snow.stamp(x, step*0.1, 0, -1, 0.24);
+    assert.ok(snow.offset(x,0) <= first && snow.offset(x,0) >= -0.24);
+    assert.equal(snow.offset(x+1.2,0),0);
+    assert.ok(Math.abs(snow.offset(x-0.001,0)-snow.offset(x+0.001,0)) < 0.003);
+  }
+});
+
+test('loose snow reduces manual acceleration and compacted tracks recover some traction', () => {
+  const world = createWorld();
+  const speeds = [0, 0.11, 0.28].map(depth => {
+    const car = newCarState(world, 0);
+    for (let i = 0; i < 120; i++) drive(car, 1/120, {throttle: true}, false, world, () => 3, VEHICLES.wagon, depth);
+    return car.speed;
+  });
+  assert.ok(speeds[0] > speeds[1] && speeds[1] > speeds[2] && speeds[2] > 0);
 });

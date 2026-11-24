@@ -27,7 +27,7 @@ export function cloudLayer(sky, sun, field) {
   noise.wrapS = noise.wrapR = THREE.RepeatWrapping;
   noise.needsUpdate = true;
   const clock = uniform(0);
-  const sunlight = vec3(sun.x, sun.y, sun.z);
+  const sunlight = sun;
   const bottom = CLOUD_BOTTOM,
     top = CLOUD_TOP;
   const sampleCloud = Fn(([p]) => {
@@ -56,7 +56,8 @@ export function cloudLayer(sky, sun, field) {
         const cloud = sampleCloud(p).toVar();
         const d = cloud.r.mul(2);
         const opacity = d.mul(step).mul(-0.0054).max(-10).exp().oneMinus();
-        const direct = cloud.g;
+        const direct = mix(float(1).sub(sampleCloud(p.add(sunlight.mul(130))).r).clamp(0,1), cloud.g,
+          dot(sunlight, vec3(-0.84, 0.51, -0.43).normalize()).max(0).pow(5));
         const silver = dot(sunlight, direction).max(0).pow(12).mul(0.72);
         const source = mix(color('#879ab3'), vec3(1.26, 1.2, 1.09), direct).add(silver.mul(direct));
         light.addAssign(source.mul(opacity).mul(transmission));
@@ -72,7 +73,7 @@ export function cloudLayer(sky, sun, field) {
   mask.minFilter = mask.magFilter = THREE.LinearFilter;
   mask.wrapS = mask.wrapT = THREE.RepeatWrapping;
   mask.needsUpdate = true;
-  const projected = positionWorld.xz.add(sunlight.xz.mul(float(bottom).sub(positionWorld.y).div(sun.y)));
+  const projected = positionWorld.xz.add(sunlight.xz.mul(float(bottom).sub(positionWorld.y).div(sunlight.y.max(0.10))));
   const shadow = texture(mask, projected.add(vec2(clock.mul(3.8), clock.mul(1.3))).mul(vec2(CLOUD_SCALE_X, CLOUD_SCALE_Z))).r;
   return { clock, shadow };
 }

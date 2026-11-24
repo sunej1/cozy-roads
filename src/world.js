@@ -2,7 +2,7 @@ import { highlands } from './highlands.js';
 import { clamp, mix, noise, randomFor, ROAD_EDGE, smooth } from './route.js';
 
 export const DEFAULT_SEED = 83472;
-export const REGION_LENGTH = 560;
+export const REGION_LENGTH = 1280;
 
 const BIOMES = [
   { name: 'Lakeshore', hills: 6, ridge: 48, trees: 0.74 },
@@ -57,7 +57,7 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
         side,
         s: index * REGION_LENGTH + (index === 0 ? 38 : (random() - 0.5) * 22),
         fjord,
-        length: fjord ? length * 2.15 : length,
+        length: fjord ? length * 5.3 : length,
         width,
         lateral: side * (width + 26 + random() * 22),
         phase: random() * Math.PI * 2,
@@ -114,10 +114,10 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     // The glacial trough bends past a narrow headland before opening into a deep outer sound.
     const mouth = smooth(-0.24, 0.56, t);
     const lakeWidth = lake.fjord
-      ? 106 + 196 * mouth + 22 * Math.sin(4.6 * t + lake.phase)
+      ? 64 + 106 * mouth + 11 * Math.sin(5.6 * t + lake.phase)
       : lake.width * (1 + 0.12 * Math.sin(t * 5.8 + lake.phase));
     const lakeX = lake.fjord
-      ? lake.side * (lakeWidth + 47 + 22 * Math.sin(t * 5.2 + lake.phase) + 13 * Math.cos(t * 8.1 - lake.phase))
+      ? lake.side * (lakeWidth + 71 + 66 * Math.sin(t * 4.8 + lake.phase) + 24 * Math.cos(t * 8.1 - lake.phase))
       : lake.lateral + Math.sin(t * 4.2 + lake.phase) * 9;
     const lakes = fromShore < 200 ? [{
       s: lake.s, lateral: lakeX, width: lakeWidth, t, pastHead: fromShore,
@@ -130,10 +130,11 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     const toDivide = shoreGap * 0.5 - fromShore;
     // Both tributaries meet the same ground elevation at their common divide.
     const head = Math.max(1, shoreGap * 0.5);
+    const pass = mountainPass(s, home, neighbor, shoreGap);
     const datum = 7 * -Math.expm1(-Math.max(0, fromShore) / 510)
-      + Math.min(14, 0.018 * head) * smooth(0, head, fromShore);
+      + Math.min(36, 0.010 * head) * smooth(0, head, fromShore);
     const divide = 1 - smooth(0, 265, toDivide);
-    if (toDivide <= 8) return { lakes, fjord, datum, divide, water: null };
+    if (toDivide <= 8) return { lakes, fjord, datum, divide, pass, water: null };
 
     const source = smooth(8, Math.min(90, shoreGap * 0.4), toDivide);
     const current = smooth(-36, 24, fromShore);
@@ -147,9 +148,9 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     // Positive curvature puts the inside of the bend on the positive-X bank.
     const curve = valleyX(s - 16) + valleyX(s + 16) - 2 * valleyX(s)
       - lake.side * (0.29 * Math.sin(s / 126 + lake.phase) + 0.63 * Math.sin(s / 53 + lake.phase));
-    return { lakes, fjord, divide, datum, water: {
-      basin: lake.s, center, width, left, right, source, riffle, bend: clamp(curve, -1, 1) * smooth(90, 185, fromShore),
-      level: datum,
+    return { lakes, fjord, divide, datum, pass, water: {
+      basin: lake.s, center, width, left, right, source, riffle, valleyAccess: source * smooth(130, 325, fromShore), bend: clamp(curve, -1, 1) * smooth(90, 185, fromShore),
+      level: datum + (pass ? pass.lift * 0.80 * smooth(0.26, 0.94, pass.weight) : 0),
       flow: Math.sign(t) * current, lake: openWidth > 0,
     } };
   }
@@ -160,27 +161,21 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     return water && lateral >= water.left - 10 && lateral <= water.right + 10 ? water.level : 0;
   }
 
-  function mountainPass(s) {
-    const regionIndex = Math.round(s / REGION_LENGTH), alpine = region(regionIndex);
-    if (alpine.name !== 'Alpine mountains') return null;
-    const center = regionIndex * REGION_LENGTH, along = s - center;
-    if (Math.abs(along) >= 264) return null;
-    if (alpine.passSide === undefined) {
-      // Only enter a spur from a continuous dry bank; keep other valleys open.
-      const sides = [-264, -132, 0, 132, 264].map(ds => Math.sign(drainage(center + ds).water?.center ?? 0));
-      alpine.passSide = sides[2] && sides.every(side => side === sides[2]) ? -sides[2] : 0;
-    }
-    if (!alpine.passSide) return null;
-    const phase = noise(key + 55, regionIndex) * Math.PI * 2;
-    const approach = 1 - smooth(72, 264, Math.abs(along));
-    const notch = 64 + 19 * Math.sin(along / 99 + phase) + 9 * Math.sin(along / 54 - phase);
-    return {
-      side: alpine.passSide, notch, approach,
-      upper: (1 - smooth(42, 216, Math.abs(along + 42))) * (82 + 37 * Math.cos(along / 102 + phase)),
-      lower: (1 - smooth(24, 130, Math.abs(along - 29))) * (39 + 18 * Math.sin(along / 85 - phase)),
-      upperFoot: 9 + 7 * (1 + Math.sin(along / 61 + phase)),
-      lowerFoot: 10 + 9 * (1 + Math.cos(along / 79 - phase)),
-    };
+  // A range separates two drainage basins. Its saddle has room for a sustained
+  // climb on both sides, and its two streams drain toward different lakes.
+  function mountainPass(s, lake, neighbor, gap) {
+    if (gap < 2450) return null;
+    const left = lake.s < neighbor.s ? lake : neighbor;
+    const right = lake.s < neighbor.s ? neighbor : lake;
+    const summit = (left.s + left.length + right.s - right.length) / 2;
+    const run = Math.min(3200, gap * 0.5 - 95);
+    const u = (s - summit) / run;
+    if (Math.abs(u) >= 1) return null;
+    const weight = 1 - smooth(0, 1, Math.abs(u));
+    const side = mix(-left.side, -right.side, smooth(-0.15, 0.15, u));
+    const bend = Math.sin(u * 6.4 + left.phase) + 0.45 * Math.sin(u * 12 - right.phase);
+    const notch = side * (225 + 62 * bend) + 24 * Math.sin(u * 4.3 + right.phase);
+    return { summit, run, u, weight, notch, lift: run * 0.041 * weight };
   }
 
   function landSection(s) {
@@ -189,14 +184,14 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     const hills = mix(a.hills, b.hills, blend);
     const valley = mix(Number(a.name === 'River valley'), Number(b.name === 'River valley'), blend);
     const axis = valleyX(s);
-    const moraine = noise(key + 76, s / 290);
+    const moraine = noise(key + 76, s / 370);
     const floor = basin.datum + 3.4 + 4.8 * moraine
       + basin.divide * (1.8 + hills * 0.055) * (0.65 + 0.5 * moraine);
     const side = Math.sign(basin.water?.center ?? 0) * (basin.water?.source ?? 0);
     const crossfall = (1 - 0.92 * valley) * ((noise(key + 12, s / 360) - 0.5) * 0.07
       - side * (0.036 + 0.105 * smooth(8, 50, hills)));
     return {
-      s, x: axis, axis, floor, crossfall, hills, valley, pass: mountainPass(s),
+      s, x: axis, axis, floor, crossfall, hills, valley,
       turnout: turnoutWidth(s),
       ridge: mix(a.ridge, b.ridge, blend),
       trees: mix(a.trees, b.trees, blend),
@@ -212,11 +207,17 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     if (knots.has(index)) return knots.get(index);
     const s = index * spacing, land = landSection(s);
     let offset = (noise(key - 49, s / 180) - 0.5) * 17;
-    if (land.pass) offset = mix(offset, land.pass.side * land.pass.notch, land.pass.approach);
+    if (land.pass) offset = mix(offset, land.pass.notch, land.pass.weight);
     if (land.water) {
       const side = Math.sign(land.water.center);
       const nearBank = side > 0 ? land.water.left : -land.water.right;
-      const setback = 31 + Math.max(0, side * land.turnout);
+      if (land.fjord) {
+        const coast = land.fjord.weight * (1 - smooth(0.64, 0.98, Math.abs(land.fjord.t)));
+        offset = mix(offset, side * (nearBank - 35), coast);
+      }
+      const riverside = land.valley * (1 - smooth(0, 0.16, land.pass?.weight ?? 0)) * land.water.valleyAccess;
+      const setback = 31 - 11 * riverside + Math.max(0, side * land.turnout);
+      offset = mix(offset, side * (nearBank - setback - 2), riverside);
       offset -= side * Math.max(0, setback - nearBank + side * offset) * land.water.source;
     }
     const knot = { x: land.axis + offset, ground: Math.max(0, naturalHeight(land, offset)) };
@@ -280,8 +281,8 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     if (!fjord) return -Infinity;
     const across = fjord.side * (lateral - fjord.center);
     const bend = smooth(0, 1450, across);
-    const axis = 0.22 + 0.30 * bend + 0.115 * Math.sin(across / 580 + fjord.phase) + 0.07 * bend * Math.sin(across / 230 - fjord.phase);
-    const halfWidth = 0.13 + 0.15 * bend;
+    const axis = 0.38 + 0.32 * bend + 0.063 * Math.sin(across / 580 + fjord.phase) + 0.032 * bend * Math.sin(across / 330 - fjord.phase);
+    const halfWidth = 0.115 + 0.085 * bend;
     return Math.min(across, (halfWidth - Math.abs(fjord.t - axis)) * fjord.length);
   }
 
@@ -310,16 +311,18 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     // Give high headlands a long footslope instead of dropping the whole massif at the waterline.
     const water = row.water;
     const bar = water ? water.bend * clamp((lateral - water.center) / Math.max(1, water.width), -1, 1) : 0;
-    const bankRun = 42 + 14 * bar * smooth(-18, -2, shore) + Math.abs(water?.flow ?? 0) * Math.min(50, Math.max(0, base - row.datum))
-      + tidal * Math.min(530, Math.max(0, base) * 1.6);
+    const coastReach = smooth(420, 1500, Math.abs(lateral + row.x - row.axis));
+    const bankRun = 42 - 16 * (water?.valleyAccess ?? 0) + 14 * bar * smooth(-18, -2, shore) + Math.abs(water?.flow ?? 0) * Math.min(31, Math.max(0, base - (water?.level ?? 0)))
+      + (row.pass?.weight ?? 0) * Math.min(185, 0.48 * Math.max(0, base - (water?.level ?? 0)))
+      + tidal * Math.min(66 + 380 * coastReach, Math.max(0, base) * (0.32 + 0.9 * coastReach));
     if (shore < -bankRun) return base;
     const level = row.water?.level ?? 0;
-    const depth = (25 + 54 * tidal) * smooth(0, 92 + 36 * tidal, shore) + 1.05 * smooth(0, 9, shore);
+    const depth = (25 + 78 * tidal) * smooth(0, 92 - 31 * tidal, shore) + 1.05 * smooth(0, 9, shore);
     const beach = smooth(0, bankRun, -shore);
     const barCrest = smooth(0.27, 0.82, bar) * smooth(-2, 2, shore) * (1 - smooth(3, 10, shore));
     const bedDepth = depth * (1 - 0.76 * bar) * (1 - 0.43 * (water?.riffle ?? 0));
     const bank = level + barCrest * 0.64 + Math.max(1.5, base - level) * beach - bedDepth;
-    return mix(base, bank, water?.source ?? 1);
+    return mix(base, bank, smooth(0, 0.92, water?.source ?? 1));
   }
 
   function naturalHeight(row, lateral) {
@@ -356,21 +359,46 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
       + range * cracks * mix(9, 32, rugged);
     const floodplain = terrace + hummock * 1.3 + surface * 0.23;
     let foothills = mix(inner, floodplain, row.valley * (1 - smooth(118, 410, distance)));
-    if (row.pass && distance < 520) {
-      const pass = row.pass;
-      const across = pass.side * offset - pass.notch;
-      const saddle = row.floor + 0.048 * pass.side * offset + 0.82 * hummock + 0.19 * surface;
-      foothills = mix(foothills, saddle, pass.approach * (1 - smooth(20, 80, Math.abs(across))));
-      // Stagger the noses of two ridges. The first joins the high country; the other
-      // ends above the valley, leaving a saddle between them and a clear riverbed.
-      const rock = 0.74 + 0.42 * fold + 0.21 * cracks;
-      const upper = smooth(0, 52 + 16 * rolling, across - pass.upperFoot - 7 * cracks)
-        * (1 - smooth(95, 405, across));
-      const lower = smooth(0, 32 + 11 * rolling, -across - pass.lowerFoot + 5 * cracks)
-        * (1 - smooth(38 + 12 * fold, 100, -across));
-      foothills += rock * (pass.upper * upper + pass.lower * lower);
+    if (row.pass) {
+      const pass = row.pass, crest = pass.weight * pass.notch;
+      const cross = offset - crest;
+      const travel = Math.abs(cross);
+      // The pass crosses the spine of the range. A wind gap cuts through the
+      // crest; on the approaches, one flank falls away into the tributary valley.
+      const openSide = Math.tanh(pass.notch / 80);
+      const gap = 1 - smooth(0.10, 0.38, Math.abs(pass.u));
+      const crossSlope = Math.tanh(cross / 125) * openSide * mix(67, 18, gap);
+      const wall = smooth(22, 240 + 65 * rolling, travel)
+        * (0.60 + 0.61 * fold + 0.33 * rolling - 0.18 * ravine);
+      const ridge = (200 + 155 * noise(s / 410 + key, offset / 370)) * wall
+        * mix(gap, 1, smooth(-35, 100, cross * openSide));
+      const mountain = row.floor + pass.weight * (crossSlope + ridge)
+        + hummock * mix(1.2, 8, smooth(25, 140, travel));
+      const extent = 1 - smooth(440, 980, travel);
+      foothills = mix(foothills, mountain, extent * smooth(0, 0.22, pass.weight)) + extent * pass.lift;
     }
-    const base = outer > 0 ? mix(foothills, mountains.height(x, s), outer) : foothills;
+    let base = outer > 0 ? mix(foothills, mountains.height(x, s), outer) : foothills;
+    if (row.fjord) {
+      const f = row.fjord, coast = shoreDistance(row, lateral);
+      const inland = Math.max(0, -coast), fjordSide = (lateral - f.center) * f.side;
+      // Bedrock buttresses alternate with hanging gullies above the glacial trough.
+      const ravineAxis = s / 139 + 1.7 * noise(x / 310 + key, s / 440);
+      const gully = Math.pow(1 - Math.abs(Math.sin(ravineAxis)), 4);
+      const headwall = 1 - smooth(0.65, 1.14, Math.abs(f.t));
+      const escarpment = (255 + 195 * rolling + 85 * fold - 140 * gully)
+        * smooth(1, 141 + 38 * gully, inland) * (1 - smooth(340, 1050, inland));
+      const back = smooth(-15, 70, fjordSide);
+      const upland = smooth(118, 310, inland) * smooth(40, 170, -f.side * offset);
+      const terrace = row.floor + 9 * smooth(1, 160, inland) + hummock * 0.8;
+      const coastalRelief = f.weight * (1 - smooth(1000, 1680, distance));
+      base = mix(base, terrace, coastalRelief * (1 - back) * (1 - upland));
+      // The outer headlands descend toward the mouth of the sound.
+      const headland = smooth(0.12, 0.55, f.t) * (1 - smooth(0.82, 1.04, f.t)) * back;
+      base = mix(base, row.floor + 0.48 * Math.max(0, base - row.floor),
+        coastalRelief * headland * (1 - smooth(260, 800, inland)));
+      base += coastalRelief * headwall * (1 - 0.54 * headland) * escarpment * mix(0.55, 1, back)
+        * mix(upland, 1, back);
+    }
     return bankHeight(row, lateral, base);
   }
 

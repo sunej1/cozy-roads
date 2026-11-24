@@ -1,4 +1,4 @@
-import { CHUNK_LENGTH, mix, ROAD_EDGE } from './route.js';
+import { CHUNK_LENGTH, mix, randomFor, ROAD_EDGE } from './route.js';
 
 export const TERRAIN_STEP = 4;
 
@@ -35,6 +35,23 @@ export function bandColumns(band) {
 }
 const rows = CHUNK_LENGTH / TERRAIN_STEP + 1;
 
+export const RIVER_REACH = 64;
+
+function streamBoulder(world, cell) {
+  const rng = randomFor(world.seed ^ Math.imul(cell + 953, 0x45d9f3b));
+  const station = (cell + 0.36 + 0.28 * rng()) * RIVER_REACH;
+  const row = world.section(station), water = row.water;
+  if (!water || water.lake || water.source < 0.94 || Math.abs(water.flow) < 0.95) return null;
+  if (rng() > 0.44 + water.riffle * 0.52) return null;
+  const radius = 0.95 + rng() * 1.65;
+  const flank = (rng() < 0.5 ? -1 : 1) * (0.22 + 0.49 * rng());
+  const cross = flank * water.width;
+  const offset = water.center + cross;
+  const depth = water.level - world.sampleTerrain(row, offset);
+  if (depth < 0.18 || depth > radius * 1.25) return null;
+  return { station, cross, radius, x: row.x + offset, level: water.level, depth, angle: rng() * Math.PI };
+}
+
 export function buildWater(world, id, seaReach = 14000) {
   const scanlines = Array.from({length: rows + 2}, (_, i) => world.section(id * CHUNK_LENGTH + (i - 1) * TERRAIN_STEP));
   const positions = [];
@@ -42,11 +59,20 @@ export function buildWater(world, id, seaReach = 14000) {
   const banks = [];
   const indices = [];
   const flow = [];
+  const channel = [], obstacle = [], boulders = [];
+  const reaches = new Map();
   const segments = 12;
   let previous = null, hasLake = false;
   for (let row = 0; row < rows; row++) {
     const sample = scanlines[row + 1], water = sample.water;
     if (!water) { previous = null; continue; }
+    const cell = Math.floor(sample.s / RIVER_REACH);
+    if (!reaches.has(cell)) {
+      const rock = streamBoulder(world, cell);
+      reaches.set(cell, rock);
+      if (rock && rock.station < (id + 1) * CHUNK_LENGTH) boulders.push(rock);
+    }
+    const rock = reaches.get(cell);
     const start = positions.length / 3;
     const before = scanlines[row], after = scanlines[row + 2];
     const across = (after.x + (after.water?.center ?? water.center)
@@ -70,7 +96,11 @@ export function buildWater(world, id, seaReach = 14000) {
       banks.push(lateral > west ? Math.min(2, westHeight / (lateral - west)) : 0,
         lateral < east ? Math.min(2, eastHeight / (east - lateral)) : 0);
       const crossChannel = Math.min(1, Math.abs(lateral - water.center) / Math.max(1, water.width));
-      const velocity = current * (1 - 0.54 * crossChannel ** 2);
+      const cross = lateral - water.center;
+      const inside = Math.max(-1, Math.min(1, cross / Math.max(1, water.width))) * water.bend;
+      const velocity = current * (1 - 0.58 * crossChannel ** 2) * (1 - 0.26 * inside);
+      channel.push(cross, inside);
+      obstacle.push(rock ? rock.station - cell * RIVER_REACH : 32, rock?.cross ?? 0, rock?.radius ?? 0);
       flow.push(-across * velocity, velocity, water.riffle * (1 - crossChannel ** 3));
     }
     // Denser samples at either shore resolve the shallow shelf on wide inlets.
@@ -103,7 +133,9 @@ export function buildWater(world, id, seaReach = 14000) {
     depth: new Float32Array(depth),
     banks: new Float32Array(banks),
     flow: new Float32Array(flow),
-    hasLake,
+    channel: new Float32Array(channel),
+    obstacle: new Float32Array(obstacle),
+    boulders, hasLake,
     index: new Uint16Array(indices),
   } : null;
 }

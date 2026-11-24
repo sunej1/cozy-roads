@@ -103,13 +103,14 @@ export function groundPose(s, x, heading, height, vehicle, waterLevel = 0) {
   };
 }
 
-function manualStep(car, dt, input, world, vehicle, ground) {
+function manualStep(car, dt, input, world, vehicle, ground, snowDepth) {
   const speed = Math.abs(car.speed);
   const lateral = car.x - world.centerX(car.s);
   const turnout = (world.turnoutWidth?.(car.s) ?? 0) * Math.sign(lateral);
   const verge = Math.abs(lateral) - ROAD_EDGE;
   const roughness = smooth(-0.2, 4.2, verge) * mix(0.46, 1, smooth(turnout - 1, turnout + 1, verge));
-  const grip = mix(1, vehicle.roughGrip, roughness) * (ground.y < ground.waterLevel ? 0.59 : 1);
+  const packed = smooth(0.025, 0.24, snowDepth);
+  const grip = (1 - 0.37 * packed) * mix(1, vehicle.roughGrip, roughness) * (ground.y < ground.waterLevel ? 0.59 : 1);
   const maximum = vehicle.topSpeed * mix(1, 0.29 + vehicle.roughGrip * 0.29, roughness) * (ground.y < ground.waterLevel ? 0.32 : 1);
   const steer = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   car.steering = mix(car.steering, steer, 1 - Math.exp(-(4.5 + vehicle.turn) * dt));
@@ -120,7 +121,7 @@ function manualStep(car, dt, input, world, vehicle, ground) {
     const pull = vehicle.pull * grip * (1 - 0.62 * smooth(vehicle.climb, vehicle.climb + 0.32, uphill));
     const engine = (input.throttle ? pull : 0) - (input.brake ? (reverse ? pull * 0.56 : 13) : 0);
     const slope = GRAVITY * ground.grade / Math.hypot(1, ground.grade);
-    const resistance = 0.30 + speed * (0.064 + roughness * (1.1 - vehicle.roughGrip) * 0.16);
+    const resistance = 0.30 + 0.62 * packed + speed * (0.064 + roughness * (1.1 - vehicle.roughGrip) * 0.16);
     const driven = car.speed + (engine - slope) * dt;
     car.speed = Math.sign(driven) * Math.max(0, Math.abs(driven) - resistance * dt);
     if (input.throttle && !input.brake && driven < 0 && speed < 0.1) car.speed = 0;
@@ -140,7 +141,7 @@ function manualStep(car, dt, input, world, vehicle, ground) {
   car.distance += Math.abs(step);
 }
 
-export function drive(car, dt, input, automatic, world, height, vehicle) {
+export function drive(car, dt, input, automatic, world, height, vehicle, snowDepth = 0) {
   if (dt <= 0) return;
   const ground = groundPose(car.s, car.x, car.heading, height, vehicle, world.waterLevel?.(car.s, car.x));
   if (car.pitch === null) car.verticalSpeed = ground.grade * car.speed / Math.hypot(1, ground.grade);
@@ -150,7 +151,7 @@ export function drive(car, dt, input, automatic, world, height, vehicle) {
     car.distance += car.speed * dt;
     alignToRoad(car, world);
   } else {
-    manualStep(car, dt, input, world, vehicle, ground);
+    manualStep(car, dt, input, world, vehicle, ground, snowDepth);
   }
 
   const next = groundPose(car.s, car.x, car.heading, height, vehicle, world.waterLevel?.(car.s, car.x));

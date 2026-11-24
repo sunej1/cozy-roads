@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import './style.css';
 import { loadLandscapeAssets } from './assets.js';
 import { loadVehicles } from './car.js';
+import { daylight, seasons } from './climate.js';
 import { driverEye } from './forest.js';
 import { WorldView } from './world-view.js';
 import { createWorld, parseSeed } from './world.js';
@@ -15,17 +16,19 @@ const canvas = element('view');
 let world;
 const ui = Object.fromEntries([
   'intro', 'intro-title', 'intro-description', 'start', 'auto', 'restart', 'new-world', 'pause', 'vehicle', 'vehicle-description',
-  'performance-toggle', 'performance', 'quality', 'look', 'resolution', 'fps', 'median', 'p95',
+  'performance-toggle', 'performance', 'quality', 'look', 'season', 'time', 'resolution', 'fps', 'median', 'p95',
   'graph', 'benchmark-status', 'benchmark', 'export', 'distance', 'biome', 'surface', 'seed', 'reverse', 'speed', 'touch',
 ].map(id => [id, element(id)]));
 const graph = ui.graph.getContext('2d');
 const keyMap = new Map(Object.entries({
   KeyW: 'throttle', ArrowUp: 'throttle', KeyS: 'brake', ArrowDown: 'brake',
+  KeyQ: 'lookLeft', KeyE: 'lookRight',
   KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right',
 }));
 const keyboard = new Set();
 const pointers = new Map();
-const input = { throttle: false, brake: false, left: false, right: false };
+const input = { throttle: false, brake: false, left: false, right: false, lookLeft: false, lookRight: false };
+let glancePointer = null, glanceStart = 0, dragLook = 0;
 const recent = new RecentFrames();
 const resolutionBudget = new ResolutionBudget();
 const cameraTarget = new THREE.Vector3();
@@ -58,7 +61,10 @@ let scene;
 let landscape;
 let model;
 let camera;
-const height = (s, x) => landscape.surfaceHeight(s, x);
+const height = (s, x) => {
+  const base = landscape.surfaceHeight(s, x);
+  return landscape.winter.value ? landscape.snow.ground(s,x,base) : base;
+};
 
 function isMoving() {
   return mode === 'driving' || mode === 'benchmark';
@@ -79,6 +85,8 @@ function setMode(next) {
   resetTime();
   keyboard.clear();
   pointers.clear();
+  glancePointer = null;
+  dragLook = 0;
   ui.intro.hidden = isMoving();
   ui.pause.hidden = !isMoving();
   ui.pause.textContent = mode === 'benchmark' ? 'Cancel run' : 'Pause';
@@ -110,6 +118,7 @@ function startDrive(useAuto, restart = false) {
   if (restart) {
     car = newCarState(world, spawnStation(location.search));
     landscape.tracks.clear();
+    landscape.snow.clear();
     wheelTurn = 0;
   }
   if (useAuto) joinRoad(car, world);
@@ -214,6 +223,14 @@ function poseScene(blend) {
     const framed = cameraY + (back + ahead) * Math.tan(roofAngle + .17);
     desiredTarget.set(targetX, Math.min(aim, framed), -targetS);
   }
+  if (mode === 'driving') {
+    const yaw = clamp(Number(input.lookRight) - Number(input.lookLeft) + dragLook, -1, 1) * 0.99;
+    if (yaw) {
+      const dx = desiredTarget.x - desiredCamera.x, dz = desiredTarget.z - desiredCamera.z;
+      desiredTarget.x = desiredCamera.x + dx * Math.cos(yaw) - dz * Math.sin(yaw);
+      desiredTarget.z = desiredCamera.z + dx * Math.sin(yaw) + dz * Math.cos(yaw);
+    }
+  }
   // Carry the chase rig with the car so uneven frame intervals cannot pump its following distance.
   if (blend < 1) {
     camera.position.x += x - lastAnchor.x;
@@ -234,6 +251,23 @@ function poseScene(blend) {
 function applyLook() {
   document.body.dataset.look = ui.look.value;
   landscape.setLook(ui.look.value === 'cozy');
+  needsRender = true;
+}
+
+function applyClimate(persist) {
+  landscape.setClimate(ui.season.value, ui.time.value);
+  if (persist) {
+    const url = new URL(location.href);
+    url.searchParams.set('season', ui.season.value);
+    url.searchParams.set('time', ui.time.value);
+    history.replaceState(history.state, '', url);
+    landscape.update(car, low, true);
+    landscape.animate(performance.now()/1000,camera,car);
+    poseScene(1);
+  }
+  for (const {root} of models.values()) root.traverse(obj => {
+    if (obj.isMesh && obj.material.envMap) obj.material.envMapIntensity = 1.1 * daylight[ui.time.value].ambient;
+  });
   needsRender = true;
 }
 
@@ -309,8 +343,13 @@ function drawGraph(values) {
 
 function updateHud() {
   ui.distance.textContent = (car.distance / 1000).toFixed(2) + ' km';
-  ui.biome.textContent = world.biomeAt(car.s).name;
-  ui.surface.textContent = performance.now() < recoveryMessageUntil ? 'Deep water · Back on road' : surfaceAt(car, world, height);
+  const row = world.section(car.s);
+  ui.biome.textContent = row.pass?.weight > 0.82 ? 'Mountain pass'
+    : row.fjord && Math.abs(row.fjord.t) < 1 ? 'Fjords' : world.biomeAt(car.s).name;
+  const surface = surfaceAt(car, world, height);
+  const depth = landscape.winter.value ? height(car.s,car.x) - landscape.surfaceHeight(car.s,car.x) : 0;
+  ui.surface.textContent = performance.now() < recoveryMessageUntil ? 'Deep water · Back on road'
+    : depth > 0.025 ? (depth < 0.16 ? 'Packed snow' : 'Fresh snow') : surface;
   ui.reverse.hidden = car.speed >= -0.15;
   ui.speed.textContent = String(Math.round(Math.abs(car.speed) * 3.6)).padStart(2, '0');
   if (ui.performance.hidden) return;
@@ -329,7 +368,7 @@ function updateHud() {
 function startBenchmark() {
   if (benchmark || !renderer) return;
   benchmark = {
-    saved: { car, mode, automatic, wheelTurn, level: resolutionBudget.level },
+    saved: { car, mode, automatic, wheelTurn, snowpack: landscape.snow.pack, level: resolutionBudget.level },
     quality: ui.quality.value,
     width: drawingBuffer.x,
     height: drawingBuffer.y,
@@ -345,6 +384,7 @@ function startBenchmark() {
     applyRenderScale();
   }
   landscape.tracks.clear();
+  landscape.snow.clear();
   car = { ...newCarState(world), speed: TOUR_SPEED };
   wheelTurn = 0;
   automatic = true;
@@ -364,6 +404,8 @@ function finishBenchmark(cancelMessage) {
       worldSeed: world.seed,
       vehicle: selectedVehicle,
       quality: run.quality,
+      timeOfDay: ui.time.value,
+      season: ui.season.value,
       resolution: [run.width, run.height],
       renderScaleRange: [run.minScale, run.maxScale],
       backend: rendererName,
@@ -384,6 +426,8 @@ function finishBenchmark(cancelMessage) {
     ui['benchmark-status'].textContent = cancelMessage;
   }
   ({ car, automatic, wheelTurn } = run.saved);
+  landscape.snow.clear();
+  landscape.snow.pack = run.saved.snowpack;
   if (useCinematic) {
     resolutionBudget.reset(run.saved.level);
     applyRenderScale();
@@ -410,7 +454,8 @@ function advance(seconds) {
   while (accumulator + 1e-9 >= STEP) {
     Object.assign(previousPose, car);
     previousPose.wheelTurn = wheelTurn;
-    if (drive(car, STEP, input, automatic, world, height, VEHICLES[selectedVehicle]) === 'deep-water') {
+    const powder = landscape.winter.value ? height(car.s,car.x) - landscape.surfaceHeight(car.s,car.x) : 0;
+    if (drive(car, STEP, input, automatic, world, height, VEHICLES[selectedVehicle], powder) === 'deep-water') {
       Object.assign(previousPose, car);
       poseScene(1);
       recoveryMessageUntil = performance.now() + 3000;
@@ -452,7 +497,10 @@ function frame(now) {
   if (isMoving() || needsRender) {
     poseScene(1 - Math.exp(-11 * Math.min(delta / 1000, 0.13)));
     const onGrass = car.clearance < 0.025 && Math.abs(model.root.position.x - world.centerX(-model.root.position.z)) > ROAD_EDGE - 1.1;
-    landscape.tracks.update(now / 1000, model.root, model.tires, onGrass);
+    if (landscape.winter.value) {
+      landscape.snow.contact(model.root, model.tires, isMoving() && car.clearance < 0.025);
+      landscape.snow.update(car.x,-car.s);
+    } else landscape.tracks.update(now / 1000, model.root, model.tires, onGrass);
     landscape.animate(now / 1000, camera, car);
     if (useCinematic) {
       if (isMoving() && resolutionBudget.observe(delta)) applyRenderScale();
@@ -484,6 +532,7 @@ function bindControls() {
   });
   ui.pause.addEventListener('click', pauseDrive);
   ui.quality.addEventListener('change', applyQuality);
+  for (const control of [ui.season, ui.time]) control.addEventListener('change', () => applyClimate(true));
   ui.look.addEventListener('change', () => {
     applyLook();
     try { localStorage.setItem('cozy-roads-look', ui.look.value); } catch {}
@@ -515,12 +564,26 @@ function bindControls() {
   window.addEventListener('blur', () => {
     keyboard.clear();
     pointers.clear();
+    glancePointer = null;
+    dragLook = 0;
   });
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) return;
     if (benchmark) finishBenchmark('Benchmark cancelled because the tab was hidden.');
     else if (mode === 'driving') pauseDrive();
     resetTime();
+  });
+  canvas.addEventListener('pointerdown', event => {
+    if (mode !== 'driving' || glancePointer !== null || event.button !== 0) return;
+    glancePointer = event.pointerId;
+    glanceStart = event.clientX;
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', event => {
+    if (event.pointerId === glancePointer) dragLook = (glanceStart - event.clientX) / (canvas.clientWidth * 0.32);
+  });
+  canvas.addEventListener('lostpointercapture', event => {
+    if (event.pointerId === glancePointer) { glancePointer = null; dragLook = 0; }
   });
   for (const button of ui.touch.querySelectorAll('button')) {
     button.addEventListener('pointerdown', event => {
@@ -554,7 +617,11 @@ async function initialize() {
   landscape = new WorldView(scene, assets, world, camera);
   ui.seed.textContent = 'World seed ' + world.seed;
   try { if (localStorage.getItem('cozy-roads-look') === 'classic') ui.look.value = 'classic'; } catch {}
+  const query = new URLSearchParams(location.search);
+  if (Object.hasOwn(seasons, query.get('season'))) ui.season.value = query.get('season');
+  if (Object.hasOwn(daylight, query.get('time'))) ui.time.value = query.get('time');
   applyLook();
+  applyClimate(false);
   chooseVehicle(selectedVehicle, false);
   applyQuality();
   mode = 'ready';

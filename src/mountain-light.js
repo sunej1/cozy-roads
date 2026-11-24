@@ -40,17 +40,18 @@ export function mountainLight(world, sun) {
       };
     }
     const { rows } = pending;
-    const drift = sun.z / -sun.x,
-      drop = (STEP * sun.y) / -sun.x;
+    const drift = sun.z / Math.abs(sun.x),
+      drop = (STEP * sun.y) / Math.abs(sun.x);
     const end = eager || activeX === undefined ? SIZE : Math.min(SIZE, pending.column + 4);
     for (let i = pending.column; i < end; i++) {
       const { previous, next } = pending;
-      const wx = x + (i + 0.5) * STEP;
+      const column = sun.x < 0 ? i : SIZE - 1 - i;
+      const wx = x + (column + 0.5) * STEP;
       for (let j = 0; j < SIZE; j++) {
         const height = world.sampleTerrain(rows[j], wx - rows[j].x);
         const source = Math.max(0, Math.min(SIZE - 1, j - Math.sign(drift)));
         const upstream = previous[j] + (previous[source] - previous[j]) * Math.abs(drift) - drop;
-        back[j * SIZE + i] = THREE.DataUtils.toHalfFloat(upstream);
+        back[j * SIZE + column] = THREE.DataUtils.toHalfFloat(upstream);
         next[j] = Math.max(height, upstream);
       }
       pending.previous = next;
@@ -65,5 +66,5 @@ export function mountainLight(world, sun) {
     pending = null;
     map.needsUpdate = true;
   }
-  return { visibility: visibilityAt(positionWorld), visibilityAt, update };
+  return { visibility: visibilityAt(positionWorld), visibilityAt, update, invalidate() { activeX = undefined; pending = null; } };
 }

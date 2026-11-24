@@ -11,17 +11,21 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. **Esc** pauses the drive. Manual steering works on and off the road. Gravity changes your speed on slopes. The suspension absorbs small crests. A fast drop can still lift all four tires, and steering takes effect again at contact. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
+Open the local URL printed by Vite. Use **W** to accelerate, **A/D** to steer, and **S** to brake. Hold **S** from a stop to reverse. The arrow keys and touch controls do the same. Hold **Q/E** or drag the scenery to glance sideways. Release to face the road again. Looking around also works during auto-drive. **Esc** pauses the drive. Manual steering works on and off the road. Gravity changes your speed on slopes. The suspension absorbs small crests. A fast drop can still lift all four tires, and steering takes effect again at contact. Choosing **Auto-drive** from a pause brings the car back to the road at its current point along the route.
 
 ## Explore a world
 
-The default seed is `83472`. Choose **New world** from the start or pause screen to generate another seed. Share or reload the resulting URL to reproduce its road and scenery. You can also enter a seed directly, for example `?seed=275`. Ordinary visits and **Restart** pick a random road position. Resume keeps your position, and the trip meter starts at zero for each new drive. Add `start` in metres to replay a particular departure, such as `?seed=83472&start=2800` for a fjord.
+The default seed is `83472`. Choose **New world** from the start or pause screen to generate another seed. Share or reload the resulting URL to reproduce its road and scenery. You can also enter a seed directly, for example `?seed=275`. Ordinary visits and **Restart** pick a random road position. Resume keeps your position, and the trip meter starts at zero for each new drive. Add `start` in metres to replay a particular departure, such as `?seed=83472&start=6050` for a fjord.
 
-Gravel pullouts overlook lakes and fjords. On the default seed, start at 90 m to approach a lakeside bench or at 1,800 m to follow a river. Auto-drive keeps to the right-hand lane. Double centerlines mark sharp bends and blind crests.
+Gravel pullouts overlook lakes and fjords. On the default seed, start at 90 m to approach a lakeside bench or at 4,920 m to follow a river. Auto-drive keeps to the right-hand lane. Double centerlines mark sharp bends and blind crests.
 
-Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. Alternating groups of landscapes include inland lakes and steep-sided coastal inlets with an open passage to the sea. The road takes its elevation from the valley floor, rounds off steep crests and winds through saddles between rock spurs on some alpine stretches. [Drive a mountain pass](https://sunej1.github.io/cozy-roads/?seed=83472&start=420) A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
+Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. Alternating groups of landscapes include inland lakes and steep-sided coastal inlets with an open passage to the sea. In long gaps between basins, the road leaves the valley, climbs a mountainside, crosses the drainage divide through a saddle and descends along a different tributary. Foam drifts through river bends and separates around exposed boulders. [Approach a mountain pass](https://sunej1.github.io/cozy-roads/?seed=83472&start=2280) · [Drive the fjord shore](https://sunej1.github.io/cozy-roads/?seed=83472&start=6050)
+
+A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
 
 The **Look** selector on the start and pause screens switches between **Cozy** (peach horizons, sage grass and softer rock detail) and **Classic**. It remembers your choice on this browser.
+
+Use **Season** and **Time** on the start or pause screen. Dawn and dusk cast long shadows from opposite sides of the landscape. Headlights come on at dusk and at night. Winter covers the road and meadows with snow. Driving compacts it under each tire and pushes loose snow into ridges. Returning to a recently driven area reveals the tracks again. Changing season away from winter, restarting, or reloading clears the snow history. Season and time are included in the share URL. [Winter at dawn](https://sunej1.github.io/cozy-roads/?seed=83472&start=2280&season=winter&time=dawn)
 
 ## Vehicles
 
@@ -31,7 +35,7 @@ Select a vehicle on the start or pause screen. The **Wayfarer** family wagon fee
 
 1. Open **Performance** and choose a quality preset.
 2. Click **Run benchmark**. After the renderer warms up, the game drives the current seed's opening 600 m at 72 km/h for 30 seconds.
-3. Click **Save JSON** to keep the frame samples, world seed, vehicle, preset, backend, output resolution, and range of internal render scales. Use the same seed, vehicle, viewport, and device pixel ratio to compare presets.
+3. Click **Save JSON** to keep the frame samples, world seed, vehicle, season, time of day, preset, backend, output resolution, and range of internal render scales. Use the same seed, vehicle, viewport, and device pixel ratio to compare presets.
 
 The measurements are elapsed time between browser animation callbacks. They include display pacing and browser overhead. The panel shows rolling FPS, median frame time, and p95 while driving. The benchmark also reports p99 and the count of frames longer than 33.3 ms. A tab switch or viewport resize cancels an in-progress run.
 

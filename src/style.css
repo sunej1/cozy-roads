@@ -19,7 +19,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); o
 
 #game, #view, .vignette { position: absolute; inset: 0; width: 100%; height: 100%; }
 #game { isolation: isolate; }
-#view { display: block; }
+#view { display: block; touch-action: none; }
 .vignette {
   pointer-events: none;
   background: linear-gradient(180deg, #101d1e80, transparent 16%, transparent 78%, #101918b8);
@@ -192,4 +192,16 @@ body[data-look="cozy"] .text-button { background-color: #353a33ce; }
   .garage select + label { margin-left: 0; }
   .garage #vehicle-description { grid-column: 1 / -1; }
   .garage select { justify-self: start; margin-bottom: 0; }
+}
+
+.garage { display: grid; grid-template-columns: auto max-content auto max-content; gap: 5px 10px; align-items: center; width: fit-content; }
+.garage label, .garage select + label { margin: 0; }
+.garage select { margin: 0; min-width: 0; width: 100%; }
+.garage #vehicle-description { grid-column: 1 / -1; }
+@media (max-width: 480px) {
+  .garage { grid-template-columns: auto minmax(0,1fr) auto minmax(0,1fr); }
+  .garage select { padding-inline: 4px; }
+}
+@media (max-height: 520px) {
+  .intro { top: 65px; bottom: 62px; overflow-y: auto; }
 }

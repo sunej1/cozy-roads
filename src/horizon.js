@@ -5,8 +5,9 @@ import { CHUNK_LENGTH } from './route.js';
 const LENGTH = 1024;
 const STRIPS = LENGTH / CHUNK_LENGTH;
 const EDGES = [1, 2, 4];
-const RANGE = 7800;
-const LOW_RANGE = 5000;
+export function horizonRange(low) {
+  return low ? 5000 : 7800;
+}
 
 function footprint(column) {
   if (Math.abs(column) <= 1) return { band: 0, left: column * 640 - 320, width: 640 };
@@ -172,7 +173,7 @@ export class Horizon {
     )
       return;
     Object.assign(this, { cx, cs, low, revision, lastFocal: this.focal });
-    const range = low ? LOW_RANGE : RANGE;
+    const range = horizonRange(low);
     const keep = new Set();
     let built = 0;
     this.pending = false;
