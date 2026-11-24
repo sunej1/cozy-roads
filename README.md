@@ -55,6 +55,8 @@ The Wayfarer, Redline 92 and Ridgeline use Comrade1280’s *Generic passenger ca
 
 The Vela uses the *Collect Cars* hypercar by drcollect. Cozy Roads simplifies the geometry, changes the finish and lights, and rigs the wheels. [Original model](https://github.com/drcollect/collect-cars) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 
+The 1975 Turbo uses Lionsharp Studios’ 930, and the GT3 RS uses Black Snow’s 992 with mesh preparation from Gioele Dalla Pozza’s configurator. Cozy Roads simplifies the meshes and textures, adjusts finishes and fits the wheel and brake-light rigs. [1975 Turbo model](https://sketchfab.com/3d-models/free-1975-porsche-911-930-turbo-8568d9d14a994b9cae59499f0dbed21e) · [GT3 RS model](https://sketchfab.com/3d-models/porsche-gt3-rs-e738eae819c34d19a31dd066c45e0f3d) · [Configurator](https://github.com/gioeledallapozza/porsche-gt3rs-configurator) · [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+
 ## Verify and build
 
 ```sh

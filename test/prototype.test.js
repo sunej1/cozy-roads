@@ -5,7 +5,6 @@ import { CHUNK_LENGTH, drive, newCarState, spawnStation, roadBend, restrictedPas
 import { bandBounds, buildTerrain, buildWater, terrainBand, tileSurface, TERRAIN_COLUMNS } from '../src/terrain.js';
 import { createWorld as seededWorld, DEFAULT_SEED, parseSeed, REGION_LENGTH } from '../src/world.js';
 import { carveBedrock } from '../src/highlands.js';
-import { makePorsche } from '../src/porsche.js';
 import { mountainPage } from '../src/horizon.js';
 import { VEHICLES, vehicleId } from '../src/vehicles.js';
 import { RecentFrames, ResolutionBudget, summarize } from '../src/timing.js';
@@ -236,7 +235,7 @@ test('distant shadow rebuilds stay bounded during a drive and restart after a re
 });
 
 test('every garage model ships with four wheel pivots on the correct axles and brake lights', () => {
-  for (const name of ['wagon', 'coupe', 'hyper', 'offroad']) {
+  for (const name of ['wagon', 'coupe', 'hyper', 'offroad', '930', 'gt3rs']) {
     const bytes = readFileSync(new URL('../assets/vehicles/' + name + '.glb', import.meta.url));
     const json = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
     const roots = json.scenes[json.scene].nodes.map(index => json.nodes[index]);
@@ -252,27 +251,19 @@ test('every garage model ships with four wheel pivots on the correct axles and b
   }
 });
 
-test('both 911 rigs match their driving axles and carry distinct spoilers and working lamp materials', () => {
-  for (const [id, modern] of [['930', false], ['gt3rs', true]]) {
-    const root = makePorsche(modern);
-    const spec = VEHICLES[id];
-    const wheels = root.children.filter(part => part.name.startsWith('wheel_'));
-    assert.equal(wheels.length, 4);
+test('both 911 wheelbases match their driving models and GT3 RS calipers steer independently of the rims', () => {
+  for (const id of ['930', 'gt3rs']) {
+    const bytes = readFileSync(new URL('../assets/vehicles/' + id + '.glb', import.meta.url));
+    const gltf = JSON.parse(bytes.toString('utf8', 20, 20 + bytes.readUInt32LE(12)));
+    const wheels = gltf.scenes[gltf.scene].nodes.map(i => gltf.nodes[i]).filter(n => n.name.startsWith('wheel_'));
     for (const side of ['l', 'r']) {
-      const [front, rear] = ['f', 'r'].map(axle => root.getObjectByName('wheel_' + axle + side));
-      assert.ok(front.position.z < 0 && rear.position.z > 0);
-      assert.ok(Math.abs(rear.position.z - front.position.z - spec.wheelbase) < 1e-6);
-      assert.equal(front.position.y, spec.radius);
+      const [front, rear] = ['f', 'r'].map(axle => wheels.find(n => n.name === 'wheel_' + axle + side));
+      assert.ok(Math.abs(rear.translation[2] - front.translation[2] - VEHICLES[id].wheelbase) < 0.001);
+      for (const wheel of [front, rear]) {
+        assert.equal(Math.sign(wheel.translation[0]), side === 'l' ? -1 : 1);
+        if (id === 'gt3rs') assert.ok(wheel.children.some(i => gltf.nodes[i].name === 'caliper'));
+      }
     }
-    const lamp = root.children.find(part => part.material?.name === 'RearLamps');
-    assert.ok(lamp.material.emissive.r > 0);
-    const trim = root.children.find(part => part.material?.name === (modern ? 'Aero' : 'Rubber'));
-    const vertices = trim.geometry.attributes.position;
-    let tail = -Infinity;
-    for (let i = 0; i < vertices.count; i++) {
-      if (vertices.getZ(i) > 1.8 && Math.abs(vertices.getX(i)) > .50) tail = Math.max(tail, vertices.getY(i));
-    }
-    assert.ok(modern ? tail > 1.35 : tail > .82 && tail < .98);
   }
 });
 

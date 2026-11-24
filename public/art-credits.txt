@@ -36,8 +36,18 @@ Mountain relief
 Mount Shuksan elevation field derived from the public-domain USGS 3D Elevation Program.
 https://www.usgs.gov/3d-elevation-program/about-3dep-products-services
 
-Porsche vehicles
-Original Cozy Roads meshes of the early 911 Turbo (930) and 992-generation 911 GT3 RS.
-Design references: Porsche Newsroom.
-https://newsroom.porsche.com/en_PME/2024/history/porsche-louise-piech-911-turbo-no-1-36900.html
-https://newsroom.porsche.com/en/2022/products/porsche-911-gt3-rs-world-premiere-29177.html
+Porsche 911 Turbo (930)
+“FREE 1975 Porsche 911 (930) Turbo” by Lionsharp Studios, CC BY 4.0.
+https://sketchfab.com/3d-models/free-1975-porsche-911-930-turbo-8568d9d14a994b9cae59499f0dbed21e
+Distribution: https://github.com/dyljay/VulkanEngine
+Vehicle design © Porsche AG.
+
+Porsche 911 GT3 RS
+“Porsche GT3 RS” by Black Snow (BlackSnow02), CC BY 4.0.
+https://sketchfab.com/3d-models/porsche-gt3-rs-e738eae819c34d19a31dd066c45e0f3d
+Configurator mesh preparation by Gioele Dalla Pozza.
+https://github.com/gioeledallapozza/porsche-gt3rs-configurator
+
+Cozy Roads adaptations of both models include geometry simplification, compressed textures,
+revised paint and lighting materials, wheel alignment, steering pivots and working brake lamps.
+License: https://creativecommons.org/licenses/by/4.0/
