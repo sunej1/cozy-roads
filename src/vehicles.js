@@ -17,6 +17,18 @@ export const VEHICLES = {
     topSpeed: 54, pull: 13.4, turn: 1.65, roughGrip: 0.43, climb: 0.39, ford: 0.16,
     radius: 0.338, width: 2.02, wheelbase: 2.76, suspension: 0.24,
   },
+  '930': {
+    name: 'Porsche 911 Turbo (930)',
+    description: 'Whale-tail 911 · Short wheelbase and a lively rear on loose ground.',
+    topSpeed: 46, pull: 8.7, turn: 1.88, roughGrip: 0.58, climb: 0.48, ford: 0.22,
+    radius: 0.307, width: 1.79, wheelbase: 2.27, suspension: 0.33,
+  },
+  gt3rs: {
+    name: 'Porsche 911 GT3 RS',
+    description: 'Track-focused 911 · Quick acceleration, precise steering and low clearance.',
+    topSpeed: 53, pull: 12.6, turn: 1.99, roughGrip: 0.47, climb: 0.41, ford: 0.17,
+    radius: 0.347, width: 1.99, wheelbase: 2.46, suspension: 0.25,
+  },
   trail: {
     name: 'Ridgeline 4×4',
     description: 'Off-roader · Keeps its grip on steep trails and can ford shallower water.',

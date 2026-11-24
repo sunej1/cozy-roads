@@ -333,7 +333,7 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
     const x = row.x + lateral;
     const outer = mountainWeight(distance);
     if (outer === 1) {
-      const altitude = mountains.height(x, s);
+      const altitude = mountains.height(x, s, distance);
       return row.fjord ? bankHeight(row, lateral, altitude) : altitude;
     }
     const rolling = noise(x / 112 + key, s / 168);
@@ -377,7 +377,7 @@ export function createWorld(seed = DEFAULT_SEED, elevations) {
       const extent = 1 - smooth(440, 980, travel);
       foothills = mix(foothills, mountain, extent * smooth(0, 0.22, pass.weight)) + extent * pass.lift;
     }
-    let base = outer > 0 ? mix(foothills, mountains.height(x, s), outer) : foothills;
+    let base = outer > 0 ? mix(foothills, mountains.height(x, s, distance), outer) : foothills;
     if (row.fjord) {
       const f = row.fjord, coast = shoreDistance(row, lateral);
       const inland = Math.max(0, -coast), fjordSide = (lateral - f.center) * f.side;

@@ -65,11 +65,15 @@ export function highlands(seed, elevations) {
     target[index + 2] = 0.1 + 0.29 * noise(s / 1910 + u0, x / 2100);
   }
   const local = new Float64Array(3);
-  function height(x, s) {
+  function height(x, s, valleyDistance) {
     coordinates(x, s, local);
     const [u, v, blend] = local;
     const altitude = mix(sample(u, v), sample(0.71 * v - 0.53 * u + 279, 0.53 * v + 0.71 * u - 374), blend);
-    return 42 + Math.max(0, altitude - 460) * 0.67;
+    const foothill = 42 + Math.max(0, altitude - 460) * 0.67;
+    // Keep low passes through the front range. Higher, more distant divides
+    // retain the cirques and saddles of the survey as they rise behind it.
+    const inland = smooth(1450, 6400, valleyDistance);
+    return foothill + inland * (95 + 1.65 * Math.max(0, foothill - 230));
   }
   return { height, coordinates };
 }

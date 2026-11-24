@@ -612,7 +612,7 @@ async function initialize() {
   renderer.toneMappingExposure = 0.96;
   scene = new THREE.Scene();
   scene.background = new THREE.Color('#aec5c6');
-  camera = new THREE.PerspectiveCamera(59, 1, 0.25, 9800);
+  camera = new THREE.PerspectiveCamera(59, 1, 0.25, 16800);
   renderer.shadowMap.enabled = true;
   landscape = new WorldView(scene, assets, world, camera);
   ui.seed.textContent = 'World seed ' + world.seed;

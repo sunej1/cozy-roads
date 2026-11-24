@@ -402,7 +402,7 @@ export class WorldView {
     this.terrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy, this.canopy.cover, this.winter, this.meadowColor);
     this.lowTerrainMaterial = makeTerrainMaterial(reliefMap, assets.turf, assets.bedrock, this.tracks, this.cozy, this.canopy.cover, this.winter, this.meadowColor, true);
     for (const material of [this.terrainMaterial, this.lowTerrainMaterial, bladeMaterial, grassMaterial, flowerMaterial, understoryMaterial]) {
-      material.aoNode = this.canopy.ambient;
+      material.aoNode = material.aoNode ? material.aoNode.mul(this.canopy.ambient) : this.canopy.ambient;
     }
     this.horizon = new Horizon(scene, world, this.terrainMaterial, (id, band) => this.chunks.has(id + ':' + band));
     this.roadMaterial = new THREE.MeshStandardNodeMaterial({
@@ -695,7 +695,7 @@ export class WorldView {
   }
 
   setQuality(low) {
-    this.far.value = low ? 4880 : 7600;
+    this.far.value = horizonRange(low) - 320;
     this.low = low;
     this.sun.visible = !low;
     this.lowSun.visible = low;

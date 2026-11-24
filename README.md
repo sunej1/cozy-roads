@@ -21,7 +21,7 @@ Gravel pullouts overlook lakes and fjords. On the default seed, start at 90 m to
 
 Landscape types blend along a continuous height field. Rivers descend from springs into lake basins. Alternating groups of landscapes include inland lakes and steep-sided coastal inlets with an open passage to the sea. In long gaps between basins, the road leaves the valley, climbs a mountainside, crosses the drainage divide through a saddle and descends along a different tributary. Foam drifts through river bends and separates around exposed boulders. [Approach a mountain pass](https://sunej1.github.io/cozy-roads/?seed=83472&start=2280) · [Drive the fjord shore](https://sunej1.github.io/cozy-roads/?seed=83472&start=6050)
 
-A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 7.8 km and Low to 5 km. [Terrain rendering research and implementation](docs/terrain-rendering.md)
+A Web Worker samples upcoming terrain in 128 m rows. Terrain streams in the direction you turn and extends sideways in bands as you move away from the road. The renderer releases meshes outside the active window. Farther ridges use streamed, elevation-derived geometry with detail selected by projected height error. Standard and Cinematic stream mountain pages out to 13.6 km and Low to 7.6 km. The outer ridgelines use coarser interiors and keep the detailed edges where neighbouring pages meet. Snow collects in sheltered bowls and gullies. [Terrain rendering research and implementation](docs/terrain-rendering.md)
 
 The **Look** selector on the start and pause screens switches between **Cozy** (peach horizons, sage grass and softer rock detail) and **Classic**. It remembers your choice on this browser.
 
@@ -29,7 +29,7 @@ Use **Season** and **Time** on the start or pause screen. Dawn and dusk cast lon
 
 ## Vehicles
 
-Select a vehicle on the start or pause screen. The **Wayfarer** family wagon feels predictable on gravel. **Redline 92** is a retro coupe with quick turn-in. **Vela** pulls hardest on pavement but loses more traction on rough ground. The **Ridgeline 4×4** keeps climbing on steeper slopes and can cross deeper shallows. Entering water deeper than the vehicle can ford returns it to the nearby road and preserves the trip distance.
+Select a vehicle on the start or pause screen. The **Wayfarer** family wagon feels predictable on gravel. **Redline 92** is a retro coupe with quick turn-in. **Vela** pulls hardest on pavement but loses more traction on rough ground. The **Ridgeline 4×4** keeps climbing on steeper slopes and can cross deeper shallows. The **Porsche 911 Turbo (930)** has a low whale tail, flared arches and a short wheelbase. The **Porsche 911 GT3 RS** has an above-roof, twin-element rear wing, quicker steering and lower clearance. Entering water deeper than the vehicle can ford returns it to the nearby road and preserves the trip distance.
 
 ## Measure a drive
 

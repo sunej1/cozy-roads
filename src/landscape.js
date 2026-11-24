@@ -5,7 +5,7 @@ import { randomFor, ROAD_EDGE } from './route.js';
 import { SkyMesh } from 'three/addons/objects/SkyMesh.js';
 import {
   attribute, cameraPosition, color, dot, float, fog, mix, normalViewGeometry, normalWorldGeometry, positionView, positionWorld, reflector,
-  screenUV, smoothstep, texture, uniform, vec2, vec3,
+  screenUV, smoothstep, texture, uniform, vec2, vec3, vec4,
 } from 'three/tsl';
 
 import { SUN_DIRECTION } from './cloud-field.js';
@@ -13,7 +13,7 @@ import { SUN_DIRECTION } from './cloud-field.js';
 export const SUN = new THREE.Vector3(...SUN_DIRECTION).normalize();
 
 export function atmosphere(scene, visibilityAt, cozy, sun, airTint) {
-  const far = uniform(7600);
+  const far = uniform(13280);
   const ray = positionWorld.sub(cameraPosition);
   const distance = ray.length();
   const first = cameraPosition.y.max(0);
@@ -22,18 +22,18 @@ export function atmosphere(scene, visibilityAt, cozy, sun, airTint) {
   const heightDelta = first.sub(last).abs().mul(0.022);
   const lowAir = lower.mul(-0.022).exp()
     .mul(heightDelta.lessThan(0.001).select(1, heightDelta.negate().exp().oneMinus().div(heightDelta.max(0.001))));
-  const clearAir = first.add(last).mul(-0.5 / 2400).exp().mul(0.000097);
+  const clearAir = first.add(last).mul(-0.5 / 6000).exp().mul(0.00014);
   const extinction = distance.mul(clearAir.add(lowAir.mul(0.00042)));
   const aerial = extinction.negate().exp().oneMinus();
   const cover = smoothstep(far.mul(0.87), far, ray.xz.length());
   const glow = dot(ray.normalize(), sun).max(0).pow(7);
-  const highAir = mix(color('#6687ac'), color('#b6cbd6'), smoothstep(800, 7400, distance));
+  const highAir = mix(color('#537ca4'), color('#acc9dd'), smoothstep(800, 12500, distance));
   // Sample the air between the driver and the ridge so mist also catches sunlight.
   const litAir = visibilityAt(cameraPosition.add(ray.mul(0.6)));
   const valley = mix(color('#64819d'), color('#eacfa6'), litAir.mul(glow.mul(0.36).add(0.56)));
   const haze = mix(mix(highAir, color('#f1d6ad'), glow.mul(0.74)), valley, lowAir.mul(0.80));
   const evening = mix(color('#a29bb5'), color('#efc4a3'), litAir.mul(0.63).add(glow.mul(0.3)));
-  scene.fogNode = fog(mix(haze, evening, cozy.mul(0.72)).mul(airTint), aerial.max(cover));
+  scene.fogNode = fog(mix(haze, evening, cozy.mul(mix(0.70, 0.22, smoothstep(800, 4500, distance)))).mul(airTint), aerial.max(cover));
   return far;
 }
 
@@ -260,6 +260,7 @@ export function makeReliefTexture(elevations) {
       for (let k = -6; k <= 6; k++) sum += smooth[index(x, y + k)] * (7 - Math.abs(k));
       residual[y * size + x] = elevations[y * size + x] * 0.25 - sum / 49;
     }
+  const directions = [[25, 0], [-25, 0], [0, 25], [0, -25], [18, 18], [-18, 18], [18, -18], [-18, -18]];
   const data = new Uint8Array(elevations.length * 4);
   const encode = (value, range) => Math.round(255 * THREE.MathUtils.clamp(0.5 + value / (2 * range), 0, 1));
   for (let y = 0; y < size; y++)
@@ -268,7 +269,12 @@ export function makeReliefTexture(elevations) {
       data[i] = encode((residual[index(x + 1, y)] - residual[index(x - 1, y)]) * 0.5, 40);
       data[i + 1] = encode((residual[index(x, y + 1)] - residual[index(x, y - 1)]) * 0.5, 40);
       data[i + 2] = encode(residual[index(x, y)], 90);
-      data[i + 3] = 255;
+      // A cirque collects snow and receives less skylight than an exposed crest.
+      let enclosure = 0;
+      for (const [dx, dy] of directions) {
+        enclosure += elevations[index(x + dx, y + dy)] - elevations[index(x, y)];
+      }
+      data[i + 3] = encode(enclosure / (8 * 4), 185);
     }
   const map = new THREE.DataTexture(data, size, size);
   map.generateMipmaps = true;
@@ -293,9 +299,9 @@ function surveyDetail(map) {
       .oneMinus()
       .mul(half)
       .toVar();
-    const sample = texture(map, mirrored.add(0.5).div(RELIEF_SIZE)).rgb.sub(0.5);
+    const sample = texture(map, mirrored.add(0.5).div(RELIEF_SIZE)).sub(0.5);
     const slope = sample.rg.mul(80);
-    return vec3(dot(slope, mirrored.dFdx()), dot(slope, mirrored.dFdy()), sample.b.mul(180));
+    return vec4(dot(slope, mirrored.dFdx()), dot(slope, mirrored.dFdy()), sample.b.mul(180), sample.a.mul(370));
   }
   return mix(residual(uv), residual(rotated), basis.z).mul(basis.w, 0.67).toVar();
 }
@@ -346,8 +352,8 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, cano
   const ledges = texture(bedrock, vec2(cross, strike.mul(0.76).sub(dip.mul(1.21))).mul(0.0093)).toVar();
   const face = blocks.g.mul(0.73).add(ledges.g.mul(0.27)).toVar();
   const mineral = smoothstep(0.26, 0.70, blocks.r.mul(0.65).add(macro.g.mul(0.35)));
-  const strata = mix(mix(color('#48505a'), color('#726d7a'), cozy),
-    mix(color('#c1ad92'), color('#c7ac96'), cozy), mineral);
+  const strata = mix(mix(color('#414d59'), color('#515669'), cozy),
+    mix(color('#a6a397'), color('#b8ab9e'), cozy), mineral);
   const recess = smoothstep(0.24, 0.67, face.add(residual.z.mul(0.0028)));
   // Damp fractures run down exposed faces. Their orientation survives steep slopes.
   const seep = texture(mineralNoise, vec2(strike.add(dip.mul(0.12)).mul(0.0017), p.y.mul(0.00064))).g;
@@ -360,13 +366,15 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, cano
     field.r.sub(0.5).mul(0.34), face.sub(0.5).mul(0.29), grain.g.sub(0.5).mul(0.12));
   const exposed = smoothstep(0.19, 0.44, bare);
   const thinSoil = smoothstep(0.09, 0.29, bare);
-  const shelter = residual.z.negate().clamp(-40, 40).mul(4.8).add(aspect.mul(80), field.r.sub(0.5).mul(115));
-  const snowline = smoothstep(325, 750, high.add(shelter));
-  const adhesion = smoothstep(0.38, 0.84, nWorld.y.add(aspect.mul(0.12), field.g.sub(0.5).mul(0.2)));
+  const shelter = residual.w.mul(2.7).add(residual.z.negate().clamp(-40, 40).mul(4.8),
+    aspect.mul(80), field.r.sub(0.5).mul(115));
+  const chute = smoothstep(4, 44, residual.w.add(residual.z.mul(-0.65)));
+  const snowline = smoothstep(420, 910, high.add(shelter));
+  const adhesion = smoothstep(0.38, 0.84, nWorld.y.add(aspect.mul(0.12), chute.mul(0.21), field.g.sub(0.5).mul(0.14)));
   const ribs = smoothstep(0.46, 0.72, face.add(residual.z.mul(0.004)));
   const steep = smoothstep(0.64, 0.98, nWorld.y).oneMinus();
-  const mountainSnow = smoothstep(0.27, 0.74, snowline.mul(adhesion))
-    .mul(smoothstep(0.17, 0.69, steep.mul(ribs.mul(0.77).add(0.23))).oneMinus());
+  const mountainSnow = smoothstep(0.31, 0.64, snowline.mul(adhesion))
+    .mul(smoothstep(0.17, 0.69, steep.mul(ribs.mul(0.77).add(0.23), chute.mul(-0.58).add(1))).oneMinus());
   const snow = mountainSnow.max(winter.mul(smoothstep(0.50, 0.86, nWorld.y.add(field.r.sub(0.5).mul(0.23)))));
   const forest = smoothstep(0.28, 0.66, macro.g.mul(0.68).add(field.r.mul(0.32))).mul(
     smoothstep(180, 440, high).oneMinus(),
@@ -374,12 +382,18 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, cano
     smoothstep(90, 540, zoom),
   );
   const canopy = mix(color('#273e38'), color('#566449'), field.b.mul(0.6).add(grain.g.mul(0.4)));
-  const drifts = mix(color('#b1c3cf'), color('#faf8ef'), field.g.mul(0.38).add(0.46));
+  const drifts = mix(color('#a6bdcf'), color('#fffdf2'), field.g.mul(0.24).add(0.71));
+  material.aoNode = chute.mul(-0.3).add(1);
   const duff = mix(color('#514334'), color('#827454'), sod.g.mul(1.6).add(grain.b.mul(0.38)).clamp());
   const litter = smoothstep(0.18, 0.67, canopyCover.add(field.g.sub(0.5).mul(0.16)));
   const turfCover = mix(mix(meadow, duff, litter), canopy, forest);
   const brokenGround = mix(turfCover, stone, outcrop.b.mul(0.52).add(0.16));
-  const coarse = mix(mix(mix(turfCover, brokenGround, thinSoil), stone, exposed), drifts, snow);
+  // Scree gathers below the cliffs on concave slopes near the angle of repose.
+  const talus = smoothstep(0.71, 0.82, nWorld.y).mul(smoothstep(0.86, 0.95, nWorld.y).oneMinus(),
+    chute, smoothstep(190, 430, high));
+  const scree = mix(color('#686d74'), color('#aaa49a'), field.b.mul(0.62).add(macro.g.mul(0.38)));
+  const bed = mix(mix(turfCover, brokenGround, thinSoil), stone, exposed);
+  const coarse = mix(mix(bed, scree, talus), drifts, snow);
   const offsets = attribute('groundOffsets', 'vec4');
   const roadside = offsets.x.abs().sub(offsets.w.mul(offsets.x.sign()).max(0));
   const gravel = texture(bedrock, p.xz.mul(0.64)).b;
@@ -397,7 +411,7 @@ export function makeTerrainMaterial(reliefMap, turf, bedrock, tracks, cozy, cano
 
   const near = smoothstep(60, 390, zoom).oneMinus();
   const crag = outcrop.g.mul(1.12).add(field.g.mul(0.36), grain.g.mul(near).mul(0.08));
-  const cliffRelief = blocks.g.mul(19).add(ledges.g.mul(4.8)).mul(exposed);
+  const cliffRelief = blocks.g.mul(19).add(ledges.g.mul(4.8)).mul(exposed, talus.mul(-0.82).add(1));
   const detail = low ? float(0) : crag.mul(exposed).add(grain.b.mul(near, 0.038),
     sod.g.mul(near, exposed.oneMinus(), 0.032), gravel.mul(shoulder, 0.03));
   const relief = cliffRelief.add(detail).mul(snow.mul(-0.95).add(1), cozy.mul(-0.32).add(1)).toVar();

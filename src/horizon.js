@@ -6,7 +6,7 @@ const LENGTH = 1024;
 const STRIPS = LENGTH / CHUNK_LENGTH;
 const EDGES = [1, 2, 4];
 export function horizonRange(low) {
-  return low ? 5000 : 7800;
+  return low ? 7600 : 13600;
 }
 
 function footprint(column) {
@@ -18,16 +18,17 @@ function footprint(column) {
 
 // Eight separately selectable clusters share one vertex buffer and one draw.
 // Their outlines retain the driveable mesh's exact samples at every detail level.
-export function mountainPage(world, column, page, divisions) {
+export function mountainPage(world, column, page, divisions, rows = new Map()) {
   const { left, width, band } = footprint(column);
   const start = page * LENGTH;
   const side = divisions + 1;
+  const skyline = divisions === 16;
+  const steps = skyline ? [1] : EDGES;
   const positions = [],
     normals = [],
     relief = [],
     groundOffsets = [],
-    lookup = new Map(),
-    rows = new Map();
+    lookup = new Map();
   const edge = bandColumns(band)
     .filter((x) => x >= left && x <= left + width)
     .map((x) => x - left);
@@ -58,9 +59,9 @@ export function mountainPage(world, column, page, divisions) {
   const vAt = (j) => (j * LENGTH) / divisions;
   for (let j = 0; j <= divisions; j++) for (let i = 0; i <= divisions; i++) vertex(uAt(i), vAt(j));
   const height = (i, j) => positions[(j * side + i) * 3 + 1];
-  const errors = Array.from({ length: STRIPS }, () => [0, 0, 0]);
-  for (let level = 1; level < EDGES.length; level++) {
-    const step = EDGES[level];
+  const errors = Array.from({ length: STRIPS }, () => steps.map(() => 0));
+  for (let level = 1; level < steps.length; level++) {
+    const step = steps[level];
     for (let j = 0; j < divisions; j++)
       for (let i = 0; i < divisions; i++) {
         const x = i - (i % step),
@@ -77,7 +78,7 @@ export function mountainPage(world, column, page, divisions) {
   }
 
   const lod = errors.map((_, strip) =>
-    EDGES.map((step) => {
+    steps.map((step) => {
       const indices = [];
       const first = (divisions * strip) / STRIPS,
         end = first + divisions / STRIPS;
@@ -91,22 +92,27 @@ export function mountainPage(world, column, page, divisions) {
             b = vertex(w, v),
             c = vertex(u, t),
             d = vertex(w, t);
-          if (i && j !== first && i + step < divisions && j + step !== end) {
+          const south = j === (skyline ? 0 : first);
+          const north = j + step === (skyline ? divisions : end);
+          // A narrow peak or notch can fall between all four skyline samples.
+          const split = skyline && Math.abs(at((u + w) / 2, (v + t) / 2)
+            - (positions[b * 3 + 1] + positions[c * 3 + 1]) / 2) > 12;
+          if (!split && i && !south && i + step < divisions && !north) {
             indices.push(a, b, c, b, d, c);
             continue;
           }
           const ring = [a];
-          if (j === first) for (const x of edge) if (x > u && x < w) ring.push(vertex(x, v));
+          if (south) for (const x of edge) if (x > u && x < w) ring.push(vertex(x, v));
           ring.push(b);
           if (i + step === divisions)
             for (let z = v + TERRAIN_STEP; z < t; z += TERRAIN_STEP) ring.push(vertex(w, z));
           ring.push(d);
-          if (j + step === end)
+          if (north)
             for (let k = edge.length - 1; k >= 0; k--)
               if (edge[k] > u && edge[k] < w) ring.push(vertex(edge[k], t));
           ring.push(c);
           if (i === 0) for (let z = t - TERRAIN_STEP; z > v; z -= TERRAIN_STEP) ring.push(vertex(u, z));
-          if (ring.length === 4) indices.push(a, b, c, b, d, c);
+          if (!split && ring.length === 4) indices.push(a, b, c, b, d, c);
           else {
             const center = vertex((u + w) / 2, (v + t) / 2);
             for (let k = 0; k < ring.length; k++) indices.push(center, ring[k], ring[(k + 1) % ring.length]);
@@ -175,6 +181,7 @@ export class Horizon {
     Object.assign(this, { cx, cs, low, revision, lastFocal: this.focal });
     const range = horizonRange(low);
     const keep = new Set();
+    const rows = new Map(); // Neighbouring pages sample the same road stations.
     let built = 0;
     this.pending = false;
     const radius = Math.ceil(range / 640) + 2;
@@ -194,7 +201,9 @@ export class Horizon {
         for (let k = 0; k < STRIPS; k++) if (this.covered(p * STRIPS + k, band)) mask |= 1 << k;
         if (mask === 255 && !entry) continue;
         keep.add(id);
-        const divisions = !low && distance < (entry?.divisions === 64 ? 3600 : 3150) ? 64 : 32;
+        const skylineStart = (low ? 3500 : 5600) + (entry?.divisions === 32 ? 350 : 0);
+        const divisions = distance > skylineStart ? 16
+          : !low && distance < (entry?.divisions === 64 ? 3600 : 3150) ? 64 : 32;
         if (!entry || (mask !== 255 && divisions !== entry.divisions)) {
           if (!eager && built >= 2 && (entry || distance > 1750)) {
             this.pending = true;
@@ -204,7 +213,7 @@ export class Horizon {
               this.scene.remove(entry.mesh);
               entry.mesh.geometry.dispose();
             }
-            const data = mountainPage(this.world, col, p, divisions);
+            const data = mountainPage(this.world, col, p, divisions, rows);
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.BufferAttribute(data.position, 3));
             geometry.setAttribute('normal', new THREE.BufferAttribute(data.normal, 3));
@@ -231,7 +240,7 @@ export class Horizon {
           const s = (p * STRIPS + k + 0.5) * CHUNK_LENGTH;
           const pixelsPerMeter = this.focal / Math.max(64, Math.hypot(dx, s - car.s) - CHUNK_LENGTH / 2);
           let level = 0;
-          while (level < 2 && errors[level + 1] * pixelsPerMeter < (low ? 6 : 2.2)) level++;
+          while (level + 1 < errors.length && errors[level + 1] * pixelsPerMeter < (low ? 6 : 2.2)) level++;
           if (mask & (1 << k)) level = 3;
           signature = signature * 4 + level;
           return level;

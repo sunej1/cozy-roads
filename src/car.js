@@ -1,6 +1,8 @@
 import * as THREE from 'three/webgpu';
+import { makePorsche } from './porsche.js';
 import { smoothstep, uniform, uv, vec3 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import decalSheet from '../assets/vehicles/911-decals.svg';
 import panorama from '../assets/vehicles/kloppenheim.jpg';
 import wagon from '../assets/vehicles/wagon.glb?url';
 import retro from '../assets/vehicles/coupe.glb?url';
@@ -10,13 +12,19 @@ import trail from '../assets/vehicles/offroad.glb?url';
 export async function loadVehicles() {
   const loader = new GLTFLoader();
   const urls = { wagon, retro, hyper, trail };
-  const [environment, ...cars] = await Promise.all([
+  const [environment, decals, ...cars] = await Promise.all([
     new THREE.TextureLoader().loadAsync(panorama),
+    new THREE.TextureLoader().loadAsync(decalSheet),
     ...Object.values(urls).map((url) => loader.loadAsync(url)),
   ]);
+  decals.colorSpace = THREE.SRGBColorSpace;
+  decals.anisotropy = 4;
   environment.mapping = THREE.EquirectangularReflectionMapping;
   environment.colorSpace = THREE.SRGBColorSpace;
-  return new Map(Object.keys(urls).map((id, i) => [id, makeVehicle(cars[i].scene, environment)]));
+  const garage = new Map(Object.keys(urls).map((id, i) => [id, makeVehicle(cars[i].scene, environment)]));
+  garage.set('930', makeVehicle(makePorsche(false, decals), environment));
+  garage.set('gt3rs', makeVehicle(makePorsche(true, decals), environment));
+  return garage;
 }
 
 function makeVehicle(root, environment) {
